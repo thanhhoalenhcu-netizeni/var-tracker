@@ -1,1 +1,388 @@
-c
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VAR Tracker">
+<meta name="theme-color" content="#2E7D32">
+<title>VAR Tracker</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%232E7D32' width='100' height='100' rx='20'/><text y='70' x='50' text-anchor='middle' font-size='60'>⚽</text></svg>">
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiVkFSIFRyYWNrZXIiLCJzaG9ydF9uYW1lIjoiVkFSIiwic3RhcnRfdXJsIjoiLiIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiMxMjEyMTIiLCJ0aGVtZV9jb2xvciI6IiMyRTdEMzIifQ==">
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#121212;--c1:#1E1E1E;--c2:#252525;--bd:#2E2E2E;--t1:rgba(255,255,255,.87);--t2:rgba(255,255,255,.6);--t3:rgba(255,255,255,.38);--grn:#4CAF50;--grn2:#2E7D32;--amb:#FF9800;--red:#F44336;--blu:#42A5F5}
+body{font-family:'Be Vietnam Pro',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;-webkit-tap-highlight-color:transparent}
+@keyframes sp{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translate(-50%,-16px)}to{opacity:1;transform:translate(-50%,0)}}
+input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.8)}
+select{appearance:auto}textarea{resize:vertical}
+
+.toast{position:fixed;top:env(safe-area-inset-top,8px);left:50%;transform:translateX(-50%);z-index:9999;background:var(--c1);border:1px solid var(--bd);border-radius:14px;padding:12px 24px;font-size:15px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);animation:fadeIn .25s;max-width:92vw;text-align:center}
+.hdr{background:var(--grn2);padding:16px;padding-top:calc(env(safe-area-inset-top,8px)+12px)}
+.hdr-in{display:flex;justify-content:space-between;align-items:center;max-width:700px;margin:0 auto}
+.nav{display:flex;background:var(--c1);border-bottom:1px solid var(--bd);padding:4px;position:sticky;top:0;z-index:100}
+.nb{display:flex;flex-direction:column;align-items:center;gap:1px;flex:1;padding:8px 2px;border:none;border-radius:10px;background:transparent;color:var(--t3);cursor:pointer;font-family:inherit}
+.nb.on{background:var(--c2);color:var(--grn)}
+.nb-i{font-size:18px}.nb-l{font-size:10px;font-weight:700}
+.main{max-width:700px;margin:0 auto;padding:16px 12px 120px}
+.crd{background:var(--c1);border-radius:18px;padding:18px;border:1px solid var(--bd);margin-bottom:12px}
+.sec-t{font-size:18px;font-weight:800;margin-bottom:16px}
+.btn-m{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--grn);color:#fff;border:none;border-radius:16px;padding:16px 28px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;min-height:54px;width:100%}
+.btn-s{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--c2);color:var(--t2);border:1px solid var(--bd);border-radius:16px;padding:16px;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit;min-height:54px;width:100%}
+.flt{display:flex;align-items:center;gap:8px;background:var(--c1);border-radius:14px;padding:10px 14px;margin-bottom:16px;border:1px solid var(--bd)}
+.di{background:var(--c2);border:1px solid var(--bd);border-radius:10px;padding:11px 12px;color:var(--t1);font-size:14px;flex:1;min-width:90px;font-family:inherit}
+.fl{font-size:13px;color:var(--t2);margin-bottom:8px;font-weight:700}
+.fi{width:100%;background:var(--c2);border:1.5px solid var(--bd);border-radius:14px;padding:14px 16px;color:var(--t1);font-size:16px;font-family:inherit;outline:none;box-sizing:border-box}
+.fi:focus{border-color:var(--grn)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.pay-t{border:none;border-radius:10px;padding:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;text-align:center}
+.pay-t.ok{background:rgba(76,175,80,.12);color:var(--grn)}
+.pay-t.no{background:rgba(255,152,0,.12);color:var(--amb)}
+.cbtn{background:var(--c2);border:1px solid var(--bd);border-radius:12px;padding:10px 18px;color:var(--t2);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;min-height:44px}
+.fab{position:fixed;bottom:24px;right:16px;width:60px;height:60px;border-radius:50%;background:var(--grn);color:#fff;border:none;cursor:pointer;font-size:22px;box-shadow:0 4px 20px rgba(76,175,80,.35);display:flex;align-items:center;justify-content:center;z-index:100}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:5000;display:flex;align-items:center;justify-content:center;padding:16px}
+.sync-btn{background:none;border:none;color:rgba(255,255,255,.7);font-size:18px;cursor:pointer;padding:8px}
+.sync-spin{animation:sp 1s linear infinite}
+@media(min-width:768px){.fi{font-size:17px;padding:16px 18px}.btn-m,.btn-s{font-size:17px;min-height:58px}.nb{padding:10px 8px}.nb-i{font-size:20px}.nb-l{font-size:12px}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+// ============================================================
+// CẤU HÌNH: Dán URL Google Apps Script vào đây
+// ============================================================
+var SYNC_URL = "https://script.google.com/macros/s/AKfycbwSE772NYibPpjceErmLdBHX7X-Y2ZvqGvBpXaNxZsPATP_s1DiwIVAVcO05X6wHnd7AA/exec";
+// ============================================================
+
+var STORE="var-tracker-v5";
+var VN={"Hàng Đẫy":{x:1},"Mỹ Đình":{x:1},"Hải Phòng":{x:1},"Thanh Hoá":{x:1},"Ninh Bình":{x:1},"Nam Định":{x:1},"VPF Hưng Yên":{x:1},"Chí Linh":{x:1},"Thống Nhất":{x:1},"Vinh":{x:1.5},"Hà Tĩnh":{x:2},"Khác":{x:1}};
+var COMPS=["V.League 1","Cúp Quốc Gia","V.League 2","Giải Hạng Nhì","Siêu Cúp","Khác"];
+var MN=["Tháng 1","Tháng 2","Tháng 3","Tháng 4","Tháng 5","Tháng 6","Tháng 7","Tháng 8","Tháng 9","Tháng 10","Tháng 11","Tháng 12"];
+var DW=["T2","T3","T4","T5","T6","T7","CN"];
+
+function vnd(n){return new Intl.NumberFormat("vi-VN").format(n)+"đ";}
+function fd(s){if(!s)return"";var d=new Date(s),w=["CN","T2","T3","T4","T5","T6","T7"];return w[d.getDay()]+", "+String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
+function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,note:"",files:[]};}
+function tA(e){return e.travelBase*e.travelMul+(e.travelExtra||0);}
+function compress(url,mx){mx=mx||1200;return new Promise(function(r){var i=new Image();i.onload=function(){var c=document.createElement("canvas"),s=i.width>mx?mx/i.width:1;c.width=i.width*s;c.height=i.height*s;c.getContext("2d").drawImage(i,0,0,c.width,c.height);r(c.toDataURL("image/jpeg",.7));};i.onerror=function(){r(url);};i.src=url;});}
+function readF(f){return new Promise(function(r,j){var x=new FileReader();x.onload=function(){r(x.result);};x.onerror=j;x.readAsDataURL(f);});}
+function dlFile(u,n){var a=document.createElement("a");a.href=u;a.download=n;document.body.appendChild(a);a.click();document.body.removeChild(a);}
+
+// Local storage
+function loadLocal(){try{var d=localStorage.getItem(STORE);return d?JSON.parse(d):[];}catch(e){return[];}}
+function saveLocal(data){try{localStorage.setItem(STORE,JSON.stringify(data));}catch(e){}}
+
+// Google Sheets sync
+async function syncPull(){
+  if(!SYNC_URL)return null;
+  try{var r=await fetch(SYNC_URL+"?action=get");var j=await r.json();if(j.ok&&j.data)return j.data;return null;}catch(e){console.warn("Pull fail:",e);return null;}
+}
+async function syncPush(data){
+  if(!SYNC_URL)return;
+  try{
+    // Don't push file data to sheets (too large)
+    var clean=data.map(function(e){return Object.assign({},e,{files:[]});});
+    await fetch(SYNC_URL+"?action=save",{method:"POST",body:JSON.stringify(clean),headers:{"Content-Type":"text/plain"}});
+  }catch(e){console.warn("Push fail:",e);}
+}
+
+function App(){
+  var[data,setData]=React.useState([]);
+  var[tab,setTab]=React.useState("home");
+  var[eid,setEid]=React.useState(null);
+  var[form,setForm]=React.useState(mk());
+  var[dFrom,setDFrom]=React.useState("");
+  var[dTo,setDTo]=React.useState("");
+  var[sType,setSType]=React.useState("travel");
+  var[loaded,setLoaded]=React.useState(false);
+  var[delId,setDelId]=React.useState(null);
+  var[toast,setToast]=React.useState(null);
+  var[syncing,setSyncing]=React.useState(false);
+  var[preview,setPreview]=React.useState(null);
+  var[fModal,setFModal]=React.useState(null);
+  var now=new Date();
+  var[calY,setCalY]=React.useState(now.getFullYear());
+  var[calM,setCalM]=React.useState(now.getMonth());
+  var[calSel,setCalSel]=React.useState(null);
+  var aiRef=React.useRef(null);
+  var fileRef=React.useRef(null);
+
+  // Load: local first, then pull from cloud
+  React.useEffect(function(){
+    var local=loadLocal();
+    setData(local);
+    setLoaded(true);
+    syncPull().then(function(cloud){
+      if(cloud&&cloud.length>0){
+        // Merge: cloud + local files
+        var merged=cloud.map(function(ce){
+          var le=local.find(function(l){return l.id===ce.id;});
+          return Object.assign({},ce,{files:le?le.files||[]:[]});
+        });
+        // Add any local-only entries
+        local.forEach(function(le){
+          if(!cloud.find(function(ce){return ce.id===le.id;})){merged.push(le);}
+        });
+        setData(merged);
+        saveLocal(merged);
+      }
+    });
+  },[]);
+
+  // Save on change
+  React.useEffect(function(){
+    if(!loaded)return;
+    saveLocal(data);
+    syncPush(data);
+  },[data,loaded]);
+
+  function doSync(){
+    setSyncing(true);
+    syncPull().then(function(cloud){
+      if(cloud){
+        var local=loadLocal();
+        var merged=cloud.map(function(ce){var le=local.find(function(l){return l.id===ce.id;});return Object.assign({},ce,{files:le?le.files||[]:[]});});
+        local.forEach(function(le){if(!cloud.find(function(ce){return ce.id===le.id;}))merged.push(le);});
+        setData(merged);saveLocal(merged);
+      }
+      setSyncing(false);notify("🔄 Đã đồng bộ");
+    }).catch(function(){setSyncing(false);});
+  }
+
+  function notify(m){setToast(m);setTimeout(function(){setToast(null);},2500);}
+  function uf(k,v){setForm(function(f){var n=Object.assign({},f);n[k]=v;if(k==="venue"&&VN[v])n.travelMul=VN[v].x;return n;});}
+  function save(){if(!form.date){notify("⚠️ Chọn ngày");return;}if(eid){setData(function(p){return p.map(function(e){return e.id===eid?Object.assign({},form):e;});});notify("✅ Cập nhật");}else{setData(function(p){return p.concat([Object.assign({},form)]);});notify("✅ Đã thêm");}setForm(mk());setEid(null);setTab("home");}
+  function rm(id){setData(function(p){return p.filter(function(e){return e.id!==id;});});setDelId(null);notify("🗑️ Xoá");}
+  function ed(e){setForm(Object.assign({},e,{files:e.files||[]}));setEid(e.id);setTab("add");}
+  function tp(id,f){setData(function(p){return p.map(function(e){if(e.id===id){var n=Object.assign({},e);n[f]=!n[f];return n;}return e;});});}
+  function mAll(f){var ids={};fl().forEach(function(e){ids[e.id]=1;});setData(function(p){return p.map(function(e){if(ids[e.id]){var n=Object.assign({},e);n[f]=true;return n;}return e;});});notify("✅ Xong");}
+
+  var fl=React.useCallback(function(){var r=data.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});if(dFrom)r=r.filter(function(e){return e.date>=dFrom;});if(dTo)r=r.filter(function(e){return e.date<=dTo;});return r;},[data,dFrom,dTo]);
+  var gs=React.useCallback(function(){var f=fl(),tS=0,pS=0,tT=0,pT=0;f.forEach(function(e){tS+=e.salary;if(e.salaryPaid)pS+=e.salary;tT+=tA(e);if(e.travelPaid)pT+=tA(e);});return{n:f.length,tS:tS,pS:pS,uS:tS-pS,tT:tT,pT:pT,uT:tT-pT,tot:tS+tT,pd:pS+pT,up:tS+tT-pS-pT};},[fl]);
+
+  function addFiles(){if(fileRef.current)fileRef.current.click();}
+  async function onFiles(ev){var fs=Array.from(ev.target.files||[]);if(!fs.length)return;var nf=[];for(var i=0;i<fs.length;i++){var d=await readF(fs[i]);if(fs[i].type.startsWith("image/"))d=await compress(d);nf.push({name:fs[i].name,type:fs[i].type,data:d});}setForm(function(f){return Object.assign({},f,{files:(f.files||[]).concat(nf)});});notify("📎 +"+nf.length);ev.target.value="";}
+  function rmF(i){setForm(function(f){return Object.assign({},f,{files:f.files.filter(function(_,j){return j!==i;})});});}
+
+  // Calendar
+  function calMap(){var map={};data.forEach(function(e){if(!e.date)return;var d=new Date(e.date);if(d.getFullYear()===calY&&d.getMonth()===calM){var k=d.getDate();if(!map[k])map[k]=[];map[k].push(e);}});return map;}
+  function calPrev(){if(calM===0){setCalM(11);setCalY(calY-1);}else setCalM(calM-1);setCalSel(null);}
+  function calNext(){if(calM===11){setCalM(0);setCalY(calY+1);}else setCalM(calM+1);setCalSel(null);}
+
+  if(!loaded)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#121212"}}><div style={{width:40,height:40,border:"3px solid #333",borderTopColor:"#4CAF50",borderRadius:"50%",animation:"sp .7s linear infinite"}}/></div>;
+
+  var s=gs(),list=fl(),cm=calMap();
+  var dim=new Date(calY,calM+1,0).getDate();
+  var fd0=(new Date(calY,calM,1).getDay()+6)%7;
+  var isImg=function(f){return f&&f.type&&f.type.startsWith("image/");};
+  var isPdf=function(f){return f&&f.type==="application/pdf";};
+  var selE=calSel?data.filter(function(e){return e.date===calSel;}):[];
+
+  var Filter=<div className="flt"><input type="date" value={dFrom} onChange={function(e){setDFrom(e.target.value);}} className="di"/><span style={{color:"var(--t3)",fontWeight:700}}>→</span><input type="date" value={dTo} onChange={function(e){setDTo(e.target.value);}} className="di"/>{(dFrom||dTo)&&<button onClick={function(){setDFrom("");setDTo("");}} style={{background:"rgba(244,67,54,.15)",border:"1px solid rgba(244,67,54,.3)",borderRadius:10,padding:"8px 12px",color:"var(--red)",fontSize:13,cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>✕</button>}</div>;
+
+  return <div>
+    {toast&&<div className="toast">{toast}</div>}
+
+    {preview&&<div className="ov" onClick={function(){setPreview(null);}}><div onClick={function(e){e.stopPropagation();}} style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+      <button onClick={function(){setPreview(null);}} style={{position:"absolute",top:-8,right:-8,width:36,height:36,borderRadius:"50%",background:"var(--c1)",border:"1px solid var(--bd)",color:"#fff",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:10}}>✕</button>
+      {isImg(preview)&&<img src={preview.data} alt="" style={{maxWidth:"100%",maxHeight:"72vh",borderRadius:14}}/>}
+      {isPdf(preview)&&<iframe src={preview.data} title="PDF" style={{width:"90vw",maxWidth:600,height:"70vh",border:"none",borderRadius:14,background:"#fff"}}/>}
+      <button onClick={function(){dlFile(preview.data,preview.name);}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 24px",fontSize:15,fontWeight:700,color:"var(--blu)",cursor:"pointer"}}>⬇ Tải về</button>
+    </div></div>}
+
+    {fModal&&<div className="ov" onClick={function(){setFModal(null);}}><div onClick={function(e){e.stopPropagation();}} style={{background:"var(--c1)",borderRadius:20,padding:24,maxWidth:500,width:"100%",maxHeight:"80vh",overflowY:"auto"}}>
+      <div style={{fontSize:17,fontWeight:800,marginBottom:4}}>📁 File</div>
+      <div style={{fontSize:13,color:"var(--t3)",marginBottom:16}}>{fd(fModal.date)}</div>
+      {(fModal.files||[]).map(function(f,i){return <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--bd)",gap:8}}>
+        <span style={{fontSize:14,color:"var(--t2)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{isPdf(f)?"📄":"🖼"} {f.name}</span>
+        <button onClick={function(){setPreview(f);}} className="cbtn" style={{padding:"6px 12px",minHeight:36}}>Xem</button>
+        <button onClick={function(){dlFile(f.data,f.name);}} className="cbtn" style={{padding:"6px 12px",minHeight:36,color:"var(--blu)"}}>⬇</button>
+      </div>;})}
+      <button onClick={function(){setFModal(null);}} style={{width:"100%",marginTop:16,background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:14,padding:14,fontSize:15,fontWeight:700,color:"var(--t2)",cursor:"pointer"}}>Đóng</button>
+    </div></div>}
+
+    <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple onChange={onFiles} style={{display:"none"}}/>
+
+    {/* Header */}
+    <header className="hdr"><div className="hdr-in">
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <div style={{fontSize:28,width:44,height:44,background:"rgba(255,255,255,.15)",borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center"}}>⚽</div>
+        <div><div style={{fontSize:20,fontWeight:800,color:"#fff"}}>VAR Tracker</div><div style={{fontSize:13,color:"rgba(255,255,255,.7)"}}>Trưởng xe · Quang</div></div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        {SYNC_URL&&<button onClick={doSync} className="sync-btn" title="Đồng bộ"><span className={syncing?"sync-spin":""}>🔄</span></button>}
+        <div style={{background:"rgba(255,255,255,.15)",borderRadius:20,padding:"6px 16px",fontSize:14,color:"#fff",fontWeight:700}}>{data.length}</div>
+      </div>
+    </div></header>
+
+    {/* Nav */}
+    <nav className="nav">
+      {[{id:"home",ic:"📋",lb:"Danh sách"},{id:"cal",ic:"📅",lb:"Lịch"},{id:"add",ic:"➕",lb:eid?"Sửa":"Thêm"},{id:"pay",ic:"💰",lb:"Thanh toán"},{id:"chart",ic:"📊",lb:"Thống kê"}].map(function(t){
+        return <button key={t.id} className={"nb"+(tab===t.id?" on":"")} onClick={function(){setTab(t.id);if(t.id==="add"&&!eid){setForm(mk());setEid(null);}}}>
+          <span className="nb-i">{t.ic}</span><span className="nb-l">{t.lb}</span>
+        </button>;
+      })}
+    </nav>
+
+    <main className="main">
+      {/* HOME */}
+      {tab==="home"&&<div>
+        {data.length>0&&<div className="g2" style={{marginBottom:20}}>
+          <div className="crd" style={{textAlign:"center",marginBottom:0}}><div style={{fontSize:22,fontWeight:800,color:"var(--grn)"}}>{s.n}</div><div style={{fontSize:13,color:"var(--t2)",marginTop:4}}>Tổng trận</div></div>
+          <div className="crd" style={{textAlign:"center",marginBottom:0,borderColor:"rgba(255,152,0,.3)"}}><div style={{fontSize:22,fontWeight:800,color:"var(--amb)"}}>{vnd(s.up)}</div><div style={{fontSize:13,color:"var(--t2)",marginTop:4}}>Chưa nhận</div></div>
+        </div>}
+        <div className="sec-t">Danh sách</div>
+        {Filter}
+        {list.length===0?<div style={{textAlign:"center",padding:"60px 20px"}}><div style={{fontSize:56,marginBottom:16}}>⚽</div><div style={{fontSize:18,color:"var(--t2)",marginBottom:24}}>Chưa có trận nào</div><button className="btn-m" onClick={function(){setTab("add");setForm(mk());setEid(null);}}>➕ Thêm trận</button></div>:
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>{list.map(function(e){return <div key={e.id} className="crd">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:8,flexWrap:"wrap"}}>
+            <span style={{fontSize:14,color:"var(--t2)"}}>{fd(e.date)}{e.time?" · "+e.time:""}</span>
+            <span style={{background:"rgba(76,175,80,.15)",color:"var(--grn)",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:700}}>{e.competition}</span>
+          </div>
+          {(e.homeTeam||e.awayTeam)&&<div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"center",marginBottom:10,fontSize:17,fontWeight:800,flexWrap:"wrap"}}>
+            <span>{e.homeTeam||"—"}</span><span style={{fontSize:12,color:"var(--t3)",background:"var(--c2)",borderRadius:6,padding:"2px 10px"}}>VS</span><span>{e.awayTeam||"—"}</span>
+          </div>}
+          {e.venue&&<div style={{fontSize:14,color:"var(--t2)",marginBottom:14}}>📍 {e.venue==="Khác"?e.customVenue||"Khác":e.venue}</div>}
+          <div className="g2" style={{marginBottom:8}}>
+            {[["Lương VAR",e.salary,"salaryPaid",e.salaryPaid],["CTP",tA(e),"travelPaid",e.travelPaid]].map(function(r){return <div key={r[0]} style={{background:"var(--c2)",borderRadius:14,padding:14,display:"flex",flexDirection:"column",gap:6}}>
+              <div style={{fontSize:10,color:"var(--t3)",fontWeight:700,letterSpacing:.8,textTransform:"uppercase"}}>{r[0]}</div>
+              <div style={{fontSize:17,fontWeight:800}}>{vnd(r[1])}</div>
+              <button className={"pay-t"+(r[3]?" ok":" no")} onClick={function(){tp(e.id,r[2]);}}>{r[3]?"✅ Đã nhận":"⏳ Chưa"}</button>
+            </div>;})}
+          </div>
+          {e.files&&e.files.length>0&&<button onClick={function(){setFModal(e);}} style={{display:"block",width:"100%",background:"rgba(66,165,245,.1)",border:"1px dashed rgba(66,165,245,.3)",borderRadius:12,padding:12,fontSize:14,color:"var(--blu)",fontWeight:700,cursor:"pointer",textAlign:"center",fontFamily:"inherit",marginTop:8}}>📎 {e.files.length} file</button>}
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14,borderTop:"1px solid var(--bd)",paddingTop:12}}>
+            <button className="cbtn" onClick={function(){ed(e);}}>✏️ Sửa</button>
+            {delId===e.id?<><button className="cbtn" style={{color:"var(--red)"}} onClick={function(){rm(e.id);}}>Xác nhận?</button><button className="cbtn" onClick={function(){setDelId(null);}}>Huỷ</button></>:
+            <button className="cbtn" style={{color:"var(--red)"}} onClick={function(){setDelId(e.id);}}>🗑️</button>}
+          </div>
+        </div>;})}</div>}
+      </div>}
+
+      {/* CALENDAR */}
+      {tab==="cal"&&<div>
+        <div className="sec-t">📅 Lịch làm việc</div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--c1)",borderRadius:16,padding:"14px 18px",marginBottom:16,border:"1px solid var(--bd)"}}>
+          <button onClick={calPrev} style={{background:"none",border:"none",color:"var(--t1)",fontSize:20,cursor:"pointer",padding:"8px 16px"}}>◀</button>
+          <div style={{fontSize:18,fontWeight:800}}>{MN[calM]} {calY}</div>
+          <button onClick={calNext} style={{background:"none",border:"none",color:"var(--t1)",fontSize:20,cursor:"pointer",padding:"8px 16px"}}>▶</button>
+        </div>
+        <div style={{background:"var(--c1)",borderRadius:18,padding:14,border:"1px solid var(--bd)",marginBottom:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:8}}>
+            {DW.map(function(d){return <div key={d} style={{textAlign:"center",fontSize:12,fontWeight:700,color:"var(--t3)",padding:6}}>{d}</div>;})}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+            {Array.from({length:fd0}).map(function(_,i){return <div key={"e"+i}/>;}) }
+            {Array.from({length:dim}).map(function(_,i){
+              var day=i+1;
+              var ds=calY+"-"+String(calM+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+              var has=(cm[day]||[]).length>0;
+              var sel=calSel===ds;
+              var today=day===now.getDate()&&calM===now.getMonth()&&calY===now.getFullYear();
+              return <button key={day} onClick={function(){setCalSel(sel?null:ds);}} style={{position:"relative",aspectRatio:"1",borderRadius:12,border:sel?"2px solid var(--grn)":today?"2px solid var(--t3)":"1px solid transparent",background:sel?"rgba(76,175,80,.15)":"transparent",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:sel?"var(--grn)":"var(--t1)",fontFamily:"inherit",fontSize:15,fontWeight:today||sel?800:500,padding:0}}>
+                {day}
+                {has&&<div style={{width:6,height:6,borderRadius:3,background:sel?"var(--grn)":"var(--amb)",position:"absolute",bottom:4}}/>}
+              </button>;
+            })}
+          </div>
+        </div>
+        {calSel?<div>
+          <div style={{fontSize:16,fontWeight:700,marginBottom:12}}>{fd(calSel)}</div>
+          {selE.length===0?<div className="crd" style={{textAlign:"center",color:"var(--t3)"}}>Không có trận</div>:
+          selE.map(function(e){return <div key={e.id} className="crd">
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{color:"var(--t2)",fontSize:14}}>{e.time||""} · {e.venue==="Khác"?e.customVenue:e.venue||""}</span><span style={{background:"rgba(76,175,80,.15)",color:"var(--grn)",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700}}>{e.competition}</span></div>
+            <div style={{fontSize:17,fontWeight:800,textAlign:"center",marginBottom:8}}>{e.homeTeam||"—"} <span style={{color:"var(--t3)",fontSize:12}}>VS</span> {e.awayTeam||"—"}</div>
+            <div className="g2">
+              {[["Lương",e.salary,e.salaryPaid],["CTP",tA(e),e.travelPaid]].map(function(r){return <div key={r[0]} style={{background:"var(--c2)",borderRadius:10,padding:10,fontSize:13}}>
+                <div style={{color:"var(--t3)",fontSize:10,fontWeight:700}}>{r[0]}</div>
+                <div style={{fontWeight:800,marginTop:4}}>{vnd(r[1])}</div>
+                <div style={{color:r[2]?"var(--grn)":"var(--amb)",fontSize:12,fontWeight:700,marginTop:2}}>{r[2]?"✅ Đã nhận":"⏳ Chưa"}</div>
+              </div>;})}
+            </div>
+          </div>;})}
+        </div>:<div className="crd">
+          <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>Tháng này</div>
+          {(function(){var c=0,inc=0;data.forEach(function(e){if(!e.date)return;var d=new Date(e.date);if(d.getFullYear()===calY&&d.getMonth()===calM){c++;inc+=e.salary+tA(e);}});return<div><div style={{display:"flex",justifyContent:"space-between",padding:"6px 0"}}><span style={{color:"var(--t2)"}}>Số trận</span><span style={{fontWeight:800}}>{c}</span></div><div style={{display:"flex",justifyContent:"space-between",padding:"6px 0"}}><span style={{color:"var(--t2)"}}>Thu nhập</span><span style={{fontWeight:800,color:"var(--grn)"}}>{vnd(inc)}</span></div></div>;})()}
+        </div>}
+      </div>}
+
+      {/* ADD */}
+      {tab==="add"&&<div>
+        <div className="sec-t">{eid?"✏️ Sửa":"➕ Thêm mới"}</div>
+        <div style={{display:"flex",alignItems:"center",gap:14,margin:"0 0 16px",color:"var(--t3)",fontSize:13}}>
+          <div style={{flex:1,height:1,background:"var(--bd)"}}/><span>Nhập thông tin</span><div style={{flex:1,height:1,background:"var(--bd)"}}/>
+        </div>
+        <div className="g2"><div><div className="fl">Ngày *</div><input type="date" value={form.date} onChange={function(e){uf("date",e.target.value);}} className="fi"/></div><div><div className="fl">Giờ đá</div><input type="time" value={form.time} onChange={function(e){uf("time",e.target.value);}} className="fi"/></div></div>
+        <div style={{marginBottom:16}}><div className="fl">Giải đấu</div><select value={form.competition} onChange={function(e){uf("competition",e.target.value);}} className="fi">{COMPS.map(function(c){return <option key={c}>{c}</option>;})}</select></div>
+        <div style={{marginBottom:16}}><div className="fl">Sân</div><select value={form.venue} onChange={function(e){uf("venue",e.target.value);}} className="fi"><option value="">— Chọn —</option>{Object.keys(VN).map(function(v){return <option key={v} value={v}>{v}{VN[v].x>1?" ×"+VN[v].x:""}</option>;})}</select>
+          {form.venue==="Khác"&&<input type="text" placeholder="Tên sân" value={form.customVenue} onChange={function(e){uf("customVenue",e.target.value);}} className="fi" style={{marginTop:10}}/>}
+          {form.venue&&form.venue!=="Khác"&&VN[form.venue]&&<div style={{fontSize:13,color:"var(--grn)",marginTop:8,padding:"6px 12px",background:"rgba(76,175,80,.1)",borderRadius:10}}>Hệ số ×{form.travelMul}</div>}
+        </div>
+        <div className="g2"><div><div className="fl">Đội nhà</div><input type="text" value={form.homeTeam} onChange={function(e){uf("homeTeam",e.target.value);}} className="fi" placeholder="SHB Đà Nẵng"/></div><div><div className="fl">Đội khách</div><input type="text" value={form.awayTeam} onChange={function(e){uf("awayTeam",e.target.value);}} className="fi" placeholder="CAHN"/></div></div>
+
+        <div style={{height:1,background:"var(--bd)",margin:"20px 0"}}/>
+        <div style={{fontSize:16,fontWeight:800,marginBottom:14}}>💰 Chi phí</div>
+        <div className="g2"><div><div className="fl">Lương VAR</div><input type="number" value={form.salary} onChange={function(e){uf("salary",+e.target.value);}} className="fi"/></div><div><div className="fl">CTP cơ bản</div><input type="number" value={form.travelBase} onChange={function(e){uf("travelBase",+e.target.value);}} className="fi"/></div></div>
+        <div className="g2"><div><div className="fl">Hệ số</div><input type="number" step="0.5" value={form.travelMul} onChange={function(e){uf("travelMul",+e.target.value);}} className="fi"/></div><div><div className="fl">= CTP</div><div style={{background:"rgba(76,175,80,.1)",border:"1.5px solid rgba(76,175,80,.25)",borderRadius:14,padding:"14px 16px",color:"var(--grn)",fontSize:17,fontWeight:800}}>{vnd(form.travelBase*form.travelMul)}</div></div></div>
+        <div className="g2"><div><div className="fl">Phát sinh</div><input type="number" value={form.travelExtra} onChange={function(e){uf("travelExtra",+e.target.value);}} className="fi"/></div><div><div className="fl">Ghi chú</div><input type="text" value={form.travelNote} onChange={function(e){uf("travelNote",e.target.value);}} className="fi" placeholder="Xăng..."/></div></div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(76,175,80,.08)",borderRadius:16,padding:"16px 20px",marginBottom:16,border:"1px solid rgba(76,175,80,.2)"}}><span>Tổng</span><span style={{fontSize:20,fontWeight:800,color:"var(--grn)"}}>{vnd(form.salary+form.travelBase*form.travelMul+(form.travelExtra||0))}</span></div>
+        <div style={{marginBottom:16}}><div className="fl">Ghi chú</div><textarea value={form.note} onChange={function(e){uf("note",e.target.value);}} className="fi" style={{minHeight:56}} placeholder="..."/></div>
+
+        <div style={{height:1,background:"var(--bd)",margin:"20px 0"}}/>
+        <div style={{fontSize:16,fontWeight:800,marginBottom:10}}>📎 File</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+          {(form.files||[]).map(function(f,i){return <div key={i} style={{position:"relative",width:76,height:76,borderRadius:12,overflow:"hidden",border:"1px solid var(--bd)",background:"var(--c2)"}}>
+            {isImg(f)?<img src={f.data} alt="" style={{width:"100%",height:"100%",objectFit:"cover",cursor:"pointer"}} onClick={function(){setPreview(f);}}/>:<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:28}} onClick={function(){setPreview(f);}}>📄</div>}
+            <button onClick={function(){rmF(i);}} style={{position:"absolute",top:2,right:2,width:20,height:20,borderRadius:"50%",background:"rgba(244,67,54,.85)",border:"none",color:"#fff",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+          </div>;})}
+          <button onClick={addFiles} style={{width:76,height:76,borderRadius:12,border:"1.5px dashed var(--bd)",background:"transparent",color:"var(--t3)",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,fontFamily:"inherit",fontSize:11}}>📎<span>Thêm</span></button>
+        </div>
+        <div style={{display:"flex",gap:10}}><button className="btn-m" style={{flex:1}} onClick={save}>✅ {eid?"Cập nhật":"Lưu"}</button><button className="btn-s" style={{flex:1}} onClick={function(){setTab("home");setEid(null);setForm(mk());}}>Huỷ</button></div>
+      </div>}
+
+      {/* PAY */}
+      {tab==="pay"&&<div>
+        <div className="sec-t">💰 Thanh toán</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:0,marginBottom:16,background:"var(--c1)",borderRadius:14,padding:4,border:"1px solid var(--bd)"}}>
+          {["travel","salary"].map(function(t){return <button key={t} onClick={function(){setSType(t);}} style={{padding:14,border:"none",borderRadius:11,background:sType===t?"var(--grn2)":"transparent",color:sType===t?"#fff":"var(--t3)",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{t==="travel"?"Công tác phí":"Lương VAR"}</button>;})}
+        </div>
+        {Filter}
+        {list.length>0&&<div className="crd">
+          {(sType==="travel"?[["Tổng CTP",s.tT,""],["Đã nhận",s.pT,"var(--grn)"],["Chưa nhận",s.uT,"var(--amb)"]]:[["Tổng lương",s.tS,""],["Đã nhận",s.pS,"var(--grn)"],["Chưa nhận",s.uS,"var(--amb)"]]).map(function(r,i){return <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",fontSize:15,color:r[2]||"var(--t1)"}}><span>{r[0]}</span><span style={{fontWeight:700}}>{vnd(r[1])}</span></div>;})}
+          <button className="btn-m" style={{marginTop:14}} onClick={function(){mAll(sType==="travel"?"travelPaid":"salaryPaid");}}>✅ Đánh dấu tất cả</button>
+        </div>}
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>{list.map(function(e){var pd=sType==="travel"?e.travelPaid:e.salaryPaid,fld=sType==="travel"?"travelPaid":"salaryPaid",amt=sType==="travel"?tA(e):e.salary;return <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,background:"var(--c1)",borderRadius:16,padding:"14px 16px",border:"1px solid var(--bd)",opacity:pd?.4:1}}>
+          <button onClick={function(){tp(e.id,fld);}} style={{width:34,height:34,borderRadius:10,border:"2px solid "+(pd?"var(--grn)":"var(--bd)"),background:pd?"var(--grn)":"var(--c2)",color:pd?"#fff":"var(--t3)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,flexShrink:0,fontFamily:"inherit"}}>{pd?"✅":"○"}</button>
+          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:"var(--t3)"}}>{fd(e.date)}</div><div style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(e.homeTeam||e.awayTeam)?e.homeTeam+" vs "+e.awayTeam:"—"}</div></div>
+          <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:17,fontWeight:800,color:pd?"var(--grn)":"var(--t1)"}}>{vnd(amt)}</div><div style={{fontSize:12,fontWeight:700,color:pd?"var(--grn)":"var(--amb)"}}>{pd?"Đã nhận":"Chưa"}</div></div>
+        </div>;})}</div>
+      </div>}
+
+      {/* STATS */}
+      {tab==="chart"&&<div>
+        <div className="sec-t">📊 Thống kê</div>
+        {Filter}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
+          {[{l:"Trận",v:s.n,c:"var(--grn)",raw:1},{l:"Thu nhập",v:s.tot,c:"var(--grn)"},{l:"Đã nhận",v:s.pd,c:"var(--grn2)"},{l:"Chưa nhận",v:s.up,c:"var(--amb)"}].map(function(x,i){return <div key={i} style={{background:"var(--c1)",borderRadius:16,padding:18,border:"1px solid var(--bd)",borderLeft:"4px solid "+x.c}}><div style={{fontSize:11,color:"var(--t3)",textTransform:"uppercase",fontWeight:700}}>{x.l}</div><div style={{fontSize:22,fontWeight:800,color:x.c,marginTop:6}}>{x.raw?x.v:vnd(x.v)}</div></div>;})}
+        </div>
+        {list.some(function(e){return e.files&&e.files.length>0;})&&<div className="crd">
+          <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>📁 File — Tải về</div>
+          {list.filter(function(e){return e.files&&e.files.length>0;}).map(function(e){return <button key={e.id} onClick={function(){setFModal(e);}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:14,padding:"14px 16px",marginBottom:8,cursor:"pointer",textAlign:"left",fontFamily:"inherit",color:"var(--t1)"}}><div><div style={{fontWeight:700,fontSize:14}}>{fd(e.date)}</div><div style={{fontSize:13,color:"var(--t3)"}}>{e.homeTeam||"—"} vs {e.awayTeam||"—"}</div></div><span style={{color:"var(--blu)",fontWeight:800}}>📎{e.files.length}</span></button>;})}
+        </div>}
+      </div>}
+    </main>
+    {tab==="home"&&<button className="fab" onClick={function(){setTab("add");setForm(mk());setEid(null);}}>➕</button>}
+  </div>;
+}
+
+ReactDOM.render(React.createElement(App),document.getElementById("root"));
+</script>
+</body>
+</html>
