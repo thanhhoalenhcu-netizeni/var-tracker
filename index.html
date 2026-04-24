@@ -64,12 +64,19 @@ var SYNC_URL = "https://script.google.com/macros/s/AKfycbwSE772NYibPpjceErmLdBHX
 var STORE="var-tracker-v5";
 var VN={"Hàng Đẫy":{x:1},"Mỹ Đình":{x:1},"Hải Phòng":{x:1},"Thanh Hoá":{x:1},"Ninh Bình":{x:1},"Nam Định":{x:1},"VPF Hưng Yên":{x:1},"Chí Linh":{x:1},"Thống Nhất":{x:1},"Vinh":{x:1.5},"Hà Tĩnh":{x:2},"Khác":{x:1}};
 var COMPS=["V.League 1","Cúp Quốc Gia","V.League 2","Giải Hạng Nhì","Siêu Cúp","Khác"];
+var CUP_ROUNDS=["Vòng loại","Vòng 1/16","Vòng 1/8","Tứ kết","Bán kết","Chung kết"];
+function getRounds(comp){
+  if(comp==="Cúp Quốc Gia")return [""].concat(CUP_ROUNDS);
+  if(comp==="Siêu Cúp")return ["","Trận Siêu Cúp"];
+  if(comp==="Khác")return null; // free text
+  var r=[""];for(var i=1;i<=30;i++)r.push("Vòng "+i);return r;
+}
 var MN=["Tháng 1","Tháng 2","Tháng 3","Tháng 4","Tháng 5","Tháng 6","Tháng 7","Tháng 8","Tháng 9","Tháng 10","Tháng 11","Tháng 12"];
 var DW=["T2","T3","T4","T5","T6","T7","CN"];
 
 function vnd(n){return new Intl.NumberFormat("vi-VN").format(n)+"đ";}
 function fd(s){if(!s)return"";var d=new Date(s),w=["CN","T2","T3","T4","T5","T6","T7"];return w[d.getDay()]+", "+String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
-function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,note:"",files:[]};}
+function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",round:"",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,note:"",files:[]};}
 function tA(e){return e.travelBase*e.travelMul+(e.travelExtra||0);}
 function compress(url,mx){mx=mx||1200;return new Promise(function(r){var i=new Image();i.onload=function(){var c=document.createElement("canvas"),s=i.width>mx?mx/i.width:1;c.width=i.width*s;c.height=i.height*s;c.getContext("2d").drawImage(i,0,0,c.width,c.height);r(c.toDataURL("image/jpeg",.7));};i.onerror=function(){r(url);};i.src=url;});}
 function readF(f){return new Promise(function(r,j){var x=new FileReader();x.onload=function(){r(x.result);};x.onerror=j;x.readAsDataURL(f);});}
@@ -85,13 +92,15 @@ async function syncPull(){
   try{var r=await fetch(SYNC_URL+"?action=get");var j=await r.json();if(j.ok&&j.data)return j.data;return null;}catch(e){console.warn("Pull fail:",e);return null;}
 }
 async function syncPush(data){
-  if(!SYNC_URL)return;
+  if(!SYNC_URL)return false;
   try{
     // Don't push file data to sheets (too large)
     var clean=data.map(function(e){return Object.assign({},e,{files:[]});});
     await fetch(SYNC_URL+"?action=save",{method:"POST",body:JSON.stringify(clean),headers:{"Content-Type":"text/plain"}});
-  }catch(e){console.warn("Push fail:",e);}
+    return true;
+  }catch(e){console.warn("Push fail:",e);return false;}
 }
+function fmtTime(t){if(!t)return"";var d=new Date(t),now=new Date(),diff=(now-d)/1000;if(diff<60)return"vừa xong";if(diff<3600)return Math.floor(diff/60)+"p trước";if(diff<86400)return Math.floor(diff/3600)+"h trước";return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");}
 
 function App(){
   var[data,setData]=React.useState([]);
@@ -105,6 +114,9 @@ function App(){
   var[delId,setDelId]=React.useState(null);
   var[toast,setToast]=React.useState(null);
   var[syncing,setSyncing]=React.useState(false);
+  var[lastSync,setLastSync]=React.useState(null);
+  var pushTimerRef=React.useRef(null);
+  var pendingRef=React.useRef(false);
   var[preview,setPreview]=React.useState(null);
   var[fModal,setFModal]=React.useState(null);
   var now=new Date();
@@ -132,16 +144,46 @@ function App(){
         });
         setData(merged);
         saveLocal(merged);
+        setLastSync(Date.now());
       }
     });
   },[]);
 
-  // Save on change
+  // Save on change: local instant, cloud debounced (1.5s) to avoid lag
   React.useEffect(function(){
     if(!loaded)return;
     saveLocal(data);
-    syncPush(data);
+    if(!SYNC_URL)return;
+    pendingRef.current=true;
+    if(pushTimerRef.current)clearTimeout(pushTimerRef.current);
+    pushTimerRef.current=setTimeout(function(){
+      setSyncing(true);
+      syncPush(data).then(function(ok){
+        setSyncing(false);
+        if(ok){pendingRef.current=false;setLastSync(Date.now());}
+      });
+    },1500);
   },[data,loaded]);
+
+  // Pull on visibility change (when user switches back to app)
+  React.useEffect(function(){
+    function onVis(){
+      if(document.visibilityState!=="visible"||!loaded||pendingRef.current)return;
+      syncPull().then(function(cloud){
+        if(!cloud||cloud.length===0)return;
+        var local=loadLocal();
+        var merged=cloud.map(function(ce){var le=local.find(function(l){return l.id===ce.id;});return Object.assign({},ce,{files:le?le.files||[]:[]});});
+        local.forEach(function(le){if(!cloud.find(function(ce){return ce.id===le.id;}))merged.push(le);});
+        // Only update if data actually changed (avoid re-render loop)
+        var aHash=JSON.stringify(merged.map(function(e){return Object.assign({},e,{files:[]});}));
+        var bHash=JSON.stringify(local.map(function(e){return Object.assign({},e,{files:[]});}));
+        if(aHash!==bHash){setData(merged);saveLocal(merged);setLastSync(Date.now());notify("🔄 Đã cập nhật từ thiết bị khác");}
+      });
+    }
+    document.addEventListener("visibilitychange",onVis);
+    window.addEventListener("focus",onVis);
+    return function(){document.removeEventListener("visibilitychange",onVis);window.removeEventListener("focus",onVis);};
+  },[loaded]);
 
   function doSync(){
     setSyncing(true);
@@ -152,12 +194,12 @@ function App(){
         local.forEach(function(le){if(!cloud.find(function(ce){return ce.id===le.id;}))merged.push(le);});
         setData(merged);saveLocal(merged);
       }
-      setSyncing(false);notify("🔄 Đã đồng bộ");
+      setSyncing(false);setLastSync(Date.now());notify("🔄 Đã đồng bộ");
     }).catch(function(){setSyncing(false);});
   }
 
   function notify(m){setToast(m);setTimeout(function(){setToast(null);},2500);}
-  function uf(k,v){setForm(function(f){var n=Object.assign({},f);n[k]=v;if(k==="venue"&&VN[v])n.travelMul=VN[v].x;return n;});}
+  function uf(k,v){setForm(function(f){var n=Object.assign({},f);n[k]=v;if(k==="venue"&&VN[v])n.travelMul=VN[v].x;if(k==="competition")n.round="";return n;});}
   function save(){if(!form.date){notify("⚠️ Chọn ngày");return;}if(eid){setData(function(p){return p.map(function(e){return e.id===eid?Object.assign({},form):e;});});notify("✅ Cập nhật");}else{setData(function(p){return p.concat([Object.assign({},form)]);});notify("✅ Đã thêm");}setForm(mk());setEid(null);setTab("home");}
   function rm(id){setData(function(p){return p.filter(function(e){return e.id!==id;});});setDelId(null);notify("🗑️ Xoá");}
   function ed(e){setForm(Object.assign({},e,{files:e.files||[]}));setEid(e.id);setTab("add");}
@@ -217,7 +259,10 @@ function App(){
         <div><div style={{fontSize:20,fontWeight:800,color:"#fff"}}>VAR Tracker</div><div style={{fontSize:13,color:"rgba(255,255,255,.7)"}}>Trưởng xe · Quang</div></div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
-        {SYNC_URL&&<button onClick={doSync} className="sync-btn" title="Đồng bộ"><span className={syncing?"sync-spin":""}>🔄</span></button>}
+        {SYNC_URL&&<div style={{display:"flex",alignItems:"center",gap:4}}>
+          {lastSync&&<span style={{fontSize:10,color:"rgba(255,255,255,.6)",fontWeight:600}}>{fmtTime(lastSync)}</span>}
+          <button onClick={doSync} className="sync-btn" title={lastSync?"Đồng bộ lần cuối: "+fmtTime(lastSync):"Đồng bộ"}><span className={syncing?"sync-spin":""}>🔄</span></button>
+        </div>}
         <div style={{background:"rgba(255,255,255,.15)",borderRadius:20,padding:"6px 16px",fontSize:14,color:"#fff",fontWeight:700}}>{data.length}</div>
       </div>
     </div></header>
@@ -244,7 +289,10 @@ function App(){
         <div style={{display:"flex",flexDirection:"column",gap:12}}>{list.map(function(e){return <div key={e.id} className="crd">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:8,flexWrap:"wrap"}}>
             <span style={{fontSize:14,color:"var(--t2)"}}>{fd(e.date)}{e.time?" · "+e.time:""}</span>
-            <span style={{background:"rgba(76,175,80,.15)",color:"var(--grn)",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:700}}>{e.competition}</span>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <span style={{background:"rgba(76,175,80,.15)",color:"var(--grn)",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:700}}>{e.competition}</span>
+              {e.round&&<span style={{background:"rgba(66,165,245,.15)",color:"var(--blu)",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:700}}>{e.round}</span>}
+            </div>
           </div>
           {(e.homeTeam||e.awayTeam)&&<div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"center",marginBottom:10,fontSize:17,fontWeight:800,flexWrap:"wrap"}}>
             <span>{e.homeTeam||"—"}</span><span style={{fontSize:12,color:"var(--t3)",background:"var(--c2)",borderRadius:6,padding:"2px 10px"}}>VS</span><span>{e.awayTeam||"—"}</span>
@@ -297,7 +345,7 @@ function App(){
           <div style={{fontSize:16,fontWeight:700,marginBottom:12}}>{fd(calSel)}</div>
           {selE.length===0?<div className="crd" style={{textAlign:"center",color:"var(--t3)"}}>Không có trận</div>:
           selE.map(function(e){return <div key={e.id} className="crd">
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{color:"var(--t2)",fontSize:14}}>{e.time||""} · {e.venue==="Khác"?e.customVenue:e.venue||""}</span><span style={{background:"rgba(76,175,80,.15)",color:"var(--grn)",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700}}>{e.competition}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,gap:6,flexWrap:"wrap"}}><span style={{color:"var(--t2)",fontSize:14}}>{e.time||""} · {e.venue==="Khác"?e.customVenue:e.venue||""}</span><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><span style={{background:"rgba(76,175,80,.15)",color:"var(--grn)",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700}}>{e.competition}</span>{e.round&&<span style={{background:"rgba(66,165,245,.15)",color:"var(--blu)",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700}}>{e.round}</span>}</div></div>
             <div style={{fontSize:17,fontWeight:800,textAlign:"center",marginBottom:8}}>{e.homeTeam||"—"} <span style={{color:"var(--t3)",fontSize:12}}>VS</span> {e.awayTeam||"—"}</div>
             <div className="g2">
               {[["Lương",e.salary,e.salaryPaid],["CTP",tA(e),e.travelPaid]].map(function(r){return <div key={r[0]} style={{background:"var(--c2)",borderRadius:10,padding:10,fontSize:13}}>
@@ -321,6 +369,7 @@ function App(){
         </div>
         <div className="g2"><div><div className="fl">Ngày *</div><input type="date" value={form.date} onChange={function(e){uf("date",e.target.value);}} className="fi"/></div><div><div className="fl">Giờ đá</div><input type="time" value={form.time} onChange={function(e){uf("time",e.target.value);}} className="fi"/></div></div>
         <div style={{marginBottom:16}}><div className="fl">Giải đấu</div><select value={form.competition} onChange={function(e){uf("competition",e.target.value);}} className="fi">{COMPS.map(function(c){return <option key={c}>{c}</option>;})}</select></div>
+        <div style={{marginBottom:16}}><div className="fl">Vòng đấu *</div>{(function(){var rs=getRounds(form.competition);if(rs===null){return <input type="text" value={form.round} onChange={function(e){uf("round",e.target.value);}} className="fi" placeholder="Nhập vòng đấu"/>;}return <select value={form.round} onChange={function(e){uf("round",e.target.value);}} className="fi">{rs.map(function(r){return <option key={r} value={r}>{r||"— Chọn vòng —"}</option>;})}</select>;})()}</div>
         <div style={{marginBottom:16}}><div className="fl">Sân</div><select value={form.venue} onChange={function(e){uf("venue",e.target.value);}} className="fi"><option value="">— Chọn —</option>{Object.keys(VN).map(function(v){return <option key={v} value={v}>{v}{VN[v].x>1?" ×"+VN[v].x:""}</option>;})}</select>
           {form.venue==="Khác"&&<input type="text" placeholder="Tên sân" value={form.customVenue} onChange={function(e){uf("customVenue",e.target.value);}} className="fi" style={{marginTop:10}}/>}
           {form.venue&&form.venue!=="Khác"&&VN[form.venue]&&<div style={{fontSize:13,color:"var(--grn)",marginTop:8,padding:"6px 12px",background:"rgba(76,175,80,.1)",borderRadius:10}}>Hệ số ×{form.travelMul}</div>}
@@ -360,7 +409,7 @@ function App(){
         </div>}
         <div style={{display:"flex",flexDirection:"column",gap:8}}>{list.map(function(e){var pd=sType==="travel"?e.travelPaid:e.salaryPaid,fld=sType==="travel"?"travelPaid":"salaryPaid",amt=sType==="travel"?tA(e):e.salary;return <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,background:"var(--c1)",borderRadius:16,padding:"14px 16px",border:"1px solid var(--bd)",opacity:pd?.4:1}}>
           <button onClick={function(){tp(e.id,fld);}} style={{width:34,height:34,borderRadius:10,border:"2px solid "+(pd?"var(--grn)":"var(--bd)"),background:pd?"var(--grn)":"var(--c2)",color:pd?"#fff":"var(--t3)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,flexShrink:0,fontFamily:"inherit"}}>{pd?"✅":"○"}</button>
-          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:"var(--t3)"}}>{fd(e.date)}</div><div style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(e.homeTeam||e.awayTeam)?e.homeTeam+" vs "+e.awayTeam:"—"}</div></div>
+          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:"var(--t3)"}}>{fd(e.date)}{e.round?" · "+e.round:""}</div><div style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(e.homeTeam||e.awayTeam)?e.homeTeam+" vs "+e.awayTeam:"—"}</div></div>
           <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:17,fontWeight:800,color:pd?"var(--grn)":"var(--t1)"}}>{vnd(amt)}</div><div style={{fontSize:12,fontWeight:700,color:pd?"var(--grn)":"var(--amb)"}}>{pd?"Đã nhận":"Chưa"}</div></div>
         </div>;})}</div>
       </div>}
@@ -372,9 +421,23 @@ function App(){
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
           {[{l:"Trận",v:s.n,c:"var(--grn)",raw:1},{l:"Thu nhập",v:s.tot,c:"var(--grn)"},{l:"Đã nhận",v:s.pd,c:"var(--grn2)"},{l:"Chưa nhận",v:s.up,c:"var(--amb)"}].map(function(x,i){return <div key={i} style={{background:"var(--c1)",borderRadius:16,padding:18,border:"1px solid var(--bd)",borderLeft:"4px solid "+x.c}}><div style={{fontSize:11,color:"var(--t3)",textTransform:"uppercase",fontWeight:700}}>{x.l}</div><div style={{fontSize:22,fontWeight:800,color:x.c,marginTop:6}}>{x.raw?x.v:vnd(x.v)}</div></div>;})}
         </div>
+        {list.length>0&&(function(){
+          var grp={};list.forEach(function(e){var k=e.competition||"Khác";if(!grp[k])grp[k]={n:0,inc:0,rounds:{}};grp[k].n++;grp[k].inc+=e.salary+tA(e);var r=e.round||"(chưa rõ)";if(!grp[k].rounds[r])grp[k].rounds[r]=0;grp[k].rounds[r]++;});
+          return <div className="crd"><div style={{fontSize:16,fontWeight:700,marginBottom:14}}>🏆 Theo giải & vòng đấu</div>
+            {Object.keys(grp).map(function(k){var g=grp[k];return <div key={k} style={{marginBottom:14,paddingBottom:14,borderBottom:"1px solid var(--bd)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <span style={{fontWeight:800,fontSize:15}}>{k}</span>
+                <span style={{fontSize:13,color:"var(--t2)"}}>{g.n} trận · <span style={{color:"var(--grn)",fontWeight:700}}>{vnd(g.inc)}</span></span>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {Object.keys(g.rounds).sort(function(a,b){var na=parseInt((a.match(/\d+/)||[0])[0]),nb=parseInt((b.match(/\d+/)||[0])[0]);return na-nb;}).map(function(r){return <span key={r} style={{background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:8,padding:"4px 10px",fontSize:12,color:"var(--t2)"}}>{r} <span style={{color:"var(--blu)",fontWeight:800}}>×{g.rounds[r]}</span></span>;})}
+              </div>
+            </div>;})}
+          </div>;
+        })()}
         {list.some(function(e){return e.files&&e.files.length>0;})&&<div className="crd">
           <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>📁 File — Tải về</div>
-          {list.filter(function(e){return e.files&&e.files.length>0;}).map(function(e){return <button key={e.id} onClick={function(){setFModal(e);}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:14,padding:"14px 16px",marginBottom:8,cursor:"pointer",textAlign:"left",fontFamily:"inherit",color:"var(--t1)"}}><div><div style={{fontWeight:700,fontSize:14}}>{fd(e.date)}</div><div style={{fontSize:13,color:"var(--t3)"}}>{e.homeTeam||"—"} vs {e.awayTeam||"—"}</div></div><span style={{color:"var(--blu)",fontWeight:800}}>📎{e.files.length}</span></button>;})}
+          {list.filter(function(e){return e.files&&e.files.length>0;}).map(function(e){return <button key={e.id} onClick={function(){setFModal(e);}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:14,padding:"14px 16px",marginBottom:8,cursor:"pointer",textAlign:"left",fontFamily:"inherit",color:"var(--t1)"}}><div><div style={{fontWeight:700,fontSize:14}}>{fd(e.date)}{e.round?" · "+e.round:""}</div><div style={{fontSize:13,color:"var(--t3)"}}>{e.homeTeam||"—"} vs {e.awayTeam||"—"}</div></div><span style={{color:"var(--blu)",fontWeight:800}}>📎{e.files.length}</span></button>;})}
         </div>}
       </div>}
     </main>
