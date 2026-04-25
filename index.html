@@ -62,21 +62,26 @@ var SYNC_URL = "https://script.google.com/macros/s/AKfycbwSE772NYibPpjceErmLdBHX
 // ============================================================
 
 var STORE="var-tracker-v5";
-var VN={"Hàng Đẫy":{x:1},"Mỹ Đình":{x:1},"Hải Phòng":{x:1},"Thanh Hoá":{x:1},"Ninh Bình":{x:1},"Nam Định":{x:1},"VPF Hưng Yên":{x:1},"Chí Linh":{x:1},"Thống Nhất":{x:1},"Vinh":{x:1.5},"Hà Tĩnh":{x:2},"Khác":{x:1}};
+var VN={"Hàng Đẫy":{x:1},"Mỹ Đình":{x:1},"Hải Phòng":{x:1},"Thanh Hoá":{x:1},"Ninh Bình":{x:1},"Nam Định":{x:1},"VPF Hưng Yên":{x:1},"Vinh":{x:1.5},"Hà Tĩnh":{x:2},"Khác":{x:1}};
+// Stadium identity: abbreviation + color for timeline markers
+var VS={"Hàng Đẫy":{a:"HĐ",c:"#7B1FA2"},"Mỹ Đình":{a:"MĐ",c:"#C62828"},"Hải Phòng":{a:"HP",c:"#BF360C"},"Thanh Hoá":{a:"TH",c:"#E65100"},"Ninh Bình":{a:"NB",c:"#2E7D32"},"Nam Định":{a:"NĐ",c:"#558B2F"},"VPF Hưng Yên":{a:"VPF",c:"#01579B"},"Vinh":{a:"VINH",c:"#4E342E"},"Hà Tĩnh":{a:"HT",c:"#880E4F"},"Khác":{a:"?",c:"#455A64"}};
+// Default home team per venue
+var VH={"Hàng Đẫy":"Hà Nội FC","Mỹ Đình":"","Hải Phòng":"CLB Hải Phòng","Thanh Hoá":"Đông Á Thanh Hoá","Ninh Bình":"Phù Đổng Ninh Bình","Nam Định":"Thép Xanh Nam Định","VPF Hưng Yên":"PVF CAND","Vinh":"SLNA","Hà Tĩnh":"Hồng Lĩnh Hà Tĩnh","Khác":""};
 var COMPS=["V.League 1","Cúp Quốc Gia","V.League 2","Giải Hạng Nhì","Siêu Cúp","Khác"];
 var CUP_ROUNDS=["Vòng loại","Vòng 1/16","Vòng 1/8","Tứ kết","Bán kết","Chung kết"];
 function getRounds(comp){
   if(comp==="Cúp Quốc Gia")return [""].concat(CUP_ROUNDS);
   if(comp==="Siêu Cúp")return ["","Trận Siêu Cúp"];
   if(comp==="Khác")return null; // free text
-  var r=[""];for(var i=1;i<=30;i++)r.push("Vòng "+i);return r;
+  var r=[""];for(var i=1;i<=20;i++)r.push("Vòng "+i);return r;
 }
 var MN=["Tháng 1","Tháng 2","Tháng 3","Tháng 4","Tháng 5","Tháng 6","Tháng 7","Tháng 8","Tháng 9","Tháng 10","Tháng 11","Tháng 12"];
 var DW=["T2","T3","T4","T5","T6","T7","CN"];
 
 function vnd(n){return new Intl.NumberFormat("vi-VN").format(n)+"đ";}
+function fmM(n){return n?new Intl.NumberFormat("vi-VN").format(n):"";}
 function fd(s){if(!s)return"";var d=new Date(s),w=["CN","T2","T3","T4","T5","T6","T7"];return w[d.getDay()]+", "+String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
-function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",round:"",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,note:"",files:[]};}
+function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",round:"",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,note:"",files:[],updatedAt:Date.now()};}
 function tA(e){return e.travelBase*e.travelMul+(e.travelExtra||0);}
 function compress(url,mx){mx=mx||1200;return new Promise(function(r){var i=new Image();i.onload=function(){var c=document.createElement("canvas"),s=i.width>mx?mx/i.width:1;c.width=i.width*s;c.height=i.height*s;c.getContext("2d").drawImage(i,0,0,c.width,c.height);r(c.toDataURL("image/jpeg",.7));};i.onerror=function(){r(url);};i.src=url;});}
 function readF(f){return new Promise(function(r,j){var x=new FileReader();x.onload=function(){r(x.result);};x.onerror=j;x.readAsDataURL(f);});}
@@ -102,9 +107,25 @@ async function syncPush(data){
 }
 function fmtTime(t){if(!t)return"";var d=new Date(t),now=new Date(),diff=(now-d)/1000;if(diff<60)return"vừa xong";if(diff<3600)return Math.floor(diff/60)+"p trước";if(diff<86400)return Math.floor(diff/3600)+"h trước";return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");}
 
+// Merge cloud + local: prefer entry with newer updatedAt to avoid losing
+// recent local edits when cloud hasn't been pushed yet.
+function smartMerge(cloud,local){
+  var byId={};
+  cloud.forEach(function(c){byId[c.id]=c;});
+  local.forEach(function(l){
+    var c=byId[l.id];
+    if(!c){byId[l.id]=l;return;}
+    var lu=l.updatedAt||0,cu=c.updatedAt||0;
+    // Pick newer; always preserve files from local (cloud doesn't store files)
+    var winner=lu>cu?l:c;
+    byId[l.id]=Object.assign({},winner,{files:l.files||[]});
+  });
+  return Object.keys(byId).map(function(k){return byId[k];});
+}
+
 function App(){
   var[data,setData]=React.useState([]);
-  var[tab,setTab]=React.useState("home");
+  var[tab,setTab]=React.useState("timeline");
   var[eid,setEid]=React.useState(null);
   var[form,setForm]=React.useState(mk());
   var[dFrom,setDFrom]=React.useState("");
@@ -133,15 +154,7 @@ function App(){
     setLoaded(true);
     syncPull().then(function(cloud){
       if(cloud&&cloud.length>0){
-        // Merge: cloud + local files
-        var merged=cloud.map(function(ce){
-          var le=local.find(function(l){return l.id===ce.id;});
-          return Object.assign({},ce,{files:le?le.files||[]:[]});
-        });
-        // Add any local-only entries
-        local.forEach(function(le){
-          if(!cloud.find(function(ce){return ce.id===le.id;})){merged.push(le);}
-        });
+        var merged=smartMerge(cloud,local);
         setData(merged);
         saveLocal(merged);
         setLastSync(Date.now());
@@ -172,9 +185,7 @@ function App(){
       syncPull().then(function(cloud){
         if(!cloud||cloud.length===0)return;
         var local=loadLocal();
-        var merged=cloud.map(function(ce){var le=local.find(function(l){return l.id===ce.id;});return Object.assign({},ce,{files:le?le.files||[]:[]});});
-        local.forEach(function(le){if(!cloud.find(function(ce){return ce.id===le.id;}))merged.push(le);});
-        // Only update if data actually changed (avoid re-render loop)
+        var merged=smartMerge(cloud,local);
         var aHash=JSON.stringify(merged.map(function(e){return Object.assign({},e,{files:[]});}));
         var bHash=JSON.stringify(local.map(function(e){return Object.assign({},e,{files:[]});}));
         if(aHash!==bHash){setData(merged);saveLocal(merged);setLastSync(Date.now());notify("🔄 Đã cập nhật từ thiết bị khác");}
@@ -190,8 +201,7 @@ function App(){
     syncPull().then(function(cloud){
       if(cloud){
         var local=loadLocal();
-        var merged=cloud.map(function(ce){var le=local.find(function(l){return l.id===ce.id;});return Object.assign({},ce,{files:le?le.files||[]:[]});});
-        local.forEach(function(le){if(!cloud.find(function(ce){return ce.id===le.id;}))merged.push(le);});
+        var merged=smartMerge(cloud,local);
         setData(merged);saveLocal(merged);
       }
       setSyncing(false);setLastSync(Date.now());notify("🔄 Đã đồng bộ");
@@ -199,12 +209,12 @@ function App(){
   }
 
   function notify(m){setToast(m);setTimeout(function(){setToast(null);},2500);}
-  function uf(k,v){setForm(function(f){var n=Object.assign({},f);n[k]=v;if(k==="venue"&&VN[v])n.travelMul=VN[v].x;if(k==="competition")n.round="";return n;});}
-  function save(){if(!form.date){notify("⚠️ Chọn ngày");return;}if(eid){setData(function(p){return p.map(function(e){return e.id===eid?Object.assign({},form):e;});});notify("✅ Cập nhật");}else{setData(function(p){return p.concat([Object.assign({},form)]);});notify("✅ Đã thêm");}setForm(mk());setEid(null);setTab("home");}
+  function uf(k,v){setForm(function(f){var n=Object.assign({},f);n[k]=v;if(k==="venue"){if(VN[v])n.travelMul=VN[v].x;if(VH[v]!==undefined)n.homeTeam=VH[v];}if(k==="competition")n.round="";return n;});}
+  function save(){if(!form.date){notify("⚠️ Chọn ngày");return;}if(!form.venue){notify("⚠️ Chọn sân");return;}if(form.venue==="Khác"&&!form.customVenue.trim()){notify("⚠️ Nhập tên sân");return;}var now=Date.now();if(eid){setData(function(p){return p.map(function(e){return e.id===eid?Object.assign({},form,{updatedAt:now}):e;});});notify("✅ Cập nhật");}else{setData(function(p){return p.concat([Object.assign({},form,{updatedAt:now})]);});notify("✅ Đã thêm");}setForm(mk());setEid(null);setTab("timeline");}
   function rm(id){setData(function(p){return p.filter(function(e){return e.id!==id;});});setDelId(null);notify("🗑️ Xoá");}
   function ed(e){setForm(Object.assign({},e,{files:e.files||[]}));setEid(e.id);setTab("add");}
-  function tp(id,f){setData(function(p){return p.map(function(e){if(e.id===id){var n=Object.assign({},e);n[f]=!n[f];return n;}return e;});});}
-  function mAll(f){var ids={};fl().forEach(function(e){ids[e.id]=1;});setData(function(p){return p.map(function(e){if(ids[e.id]){var n=Object.assign({},e);n[f]=true;return n;}return e;});});notify("✅ Xong");}
+  function tp(id,f){setData(function(p){return p.map(function(e){if(e.id===id){var n=Object.assign({},e);n[f]=!n[f];n.updatedAt=Date.now();return n;}return e;});});}
+  function mAll(f){var ids={};fl().forEach(function(e){ids[e.id]=1;});var now=Date.now();setData(function(p){return p.map(function(e){if(ids[e.id]){var n=Object.assign({},e);n[f]=true;n.updatedAt=now;return n;}return e;});});notify("✅ Xong");}
 
   var fl=React.useCallback(function(){var r=data.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});if(dFrom)r=r.filter(function(e){return e.date>=dFrom;});if(dTo)r=r.filter(function(e){return e.date<=dTo;});return r;},[data,dFrom,dTo]);
   var gs=React.useCallback(function(){var f=fl(),tS=0,pS=0,tT=0,pT=0;f.forEach(function(e){tS+=e.salary;if(e.salaryPaid)pS+=e.salary;tT+=tA(e);if(e.travelPaid)pT+=tA(e);});return{n:f.length,tS:tS,pS:pS,uS:tS-pS,tT:tT,pT:pT,uT:tT-pT,tot:tS+tT,pd:pS+pT,up:tS+tT-pS-pT};},[fl]);
@@ -269,7 +279,7 @@ function App(){
 
     {/* Nav */}
     <nav className="nav">
-      {[{id:"home",ic:"📋",lb:"Danh sách"},{id:"cal",ic:"📅",lb:"Lịch"},{id:"add",ic:"➕",lb:eid?"Sửa":"Thêm"},{id:"pay",ic:"💰",lb:"Thanh toán"},{id:"chart",ic:"📊",lb:"Thống kê"}].map(function(t){
+      {[{id:"timeline",ic:"⏰",lb:"Cần thu"},{id:"home",ic:"📋",lb:"Danh sách"},{id:"cal",ic:"📅",lb:"Lịch"},{id:"add",ic:"➕",lb:eid?"Sửa":"Thêm"},{id:"pay",ic:"💰",lb:"Thanh toán"},{id:"chart",ic:"📊",lb:"Thống kê"}].map(function(t){
         return <button key={t.id} className={"nb"+(tab===t.id?" on":"")} onClick={function(){setTab(t.id);if(t.id==="add"&&!eid){setForm(mk());setEid(null);}}}>
           <span className="nb-i">{t.ic}</span><span className="nb-l">{t.lb}</span>
         </button>;
@@ -370,7 +380,7 @@ function App(){
         <div className="g2"><div><div className="fl">Ngày *</div><input type="date" value={form.date} onChange={function(e){uf("date",e.target.value);}} className="fi"/></div><div><div className="fl">Giờ đá</div><input type="time" value={form.time} onChange={function(e){uf("time",e.target.value);}} className="fi"/></div></div>
         <div style={{marginBottom:16}}><div className="fl">Giải đấu</div><select value={form.competition} onChange={function(e){uf("competition",e.target.value);}} className="fi">{COMPS.map(function(c){return <option key={c}>{c}</option>;})}</select></div>
         <div style={{marginBottom:16}}><div className="fl">Vòng đấu *</div>{(function(){var rs=getRounds(form.competition);if(rs===null){return <input type="text" value={form.round} onChange={function(e){uf("round",e.target.value);}} className="fi" placeholder="Nhập vòng đấu"/>;}return <select value={form.round} onChange={function(e){uf("round",e.target.value);}} className="fi">{rs.map(function(r){return <option key={r} value={r}>{r||"— Chọn vòng —"}</option>;})}</select>;})()}</div>
-        <div style={{marginBottom:16}}><div className="fl">Sân</div><select value={form.venue} onChange={function(e){uf("venue",e.target.value);}} className="fi"><option value="">— Chọn —</option>{Object.keys(VN).map(function(v){return <option key={v} value={v}>{v}{VN[v].x>1?" ×"+VN[v].x:""}</option>;})}</select>
+        <div style={{marginBottom:16}}><div className="fl">Sân *</div><select value={form.venue} onChange={function(e){uf("venue",e.target.value);}} className="fi"><option value="">— Chọn —</option>{Object.keys(VN).map(function(v){return <option key={v} value={v}>{v}{VN[v].x>1?" ×"+VN[v].x:""}</option>;})}</select>
           {form.venue==="Khác"&&<input type="text" placeholder="Tên sân" value={form.customVenue} onChange={function(e){uf("customVenue",e.target.value);}} className="fi" style={{marginTop:10}}/>}
           {form.venue&&form.venue!=="Khác"&&VN[form.venue]&&<div style={{fontSize:13,color:"var(--grn)",marginTop:8,padding:"6px 12px",background:"rgba(76,175,80,.1)",borderRadius:10}}>Hệ số ×{form.travelMul}</div>}
         </div>
@@ -378,9 +388,9 @@ function App(){
 
         <div style={{height:1,background:"var(--bd)",margin:"20px 0"}}/>
         <div style={{fontSize:16,fontWeight:800,marginBottom:14}}>💰 Chi phí</div>
-        <div className="g2"><div><div className="fl">Lương VAR</div><input type="number" value={form.salary} onChange={function(e){uf("salary",+e.target.value);}} className="fi"/></div><div><div className="fl">CTP cơ bản</div><input type="number" value={form.travelBase} onChange={function(e){uf("travelBase",+e.target.value);}} className="fi"/></div></div>
+        <div className="g2"><div><div className="fl">Lương VAR</div><input type="text" inputMode="numeric" value={fmM(form.salary)} onChange={function(e){var v=e.target.value.replace(/[^\d]/g,"");uf("salary",v?+v:0);}} className="fi"/></div><div><div className="fl">CTP cơ bản</div><input type="text" inputMode="numeric" value={fmM(form.travelBase)} onChange={function(e){var v=e.target.value.replace(/[^\d]/g,"");uf("travelBase",v?+v:0);}} className="fi"/></div></div>
         <div className="g2"><div><div className="fl">Hệ số</div><input type="number" step="0.5" value={form.travelMul} onChange={function(e){uf("travelMul",+e.target.value);}} className="fi"/></div><div><div className="fl">= CTP</div><div style={{background:"rgba(76,175,80,.1)",border:"1.5px solid rgba(76,175,80,.25)",borderRadius:14,padding:"14px 16px",color:"var(--grn)",fontSize:17,fontWeight:800}}>{vnd(form.travelBase*form.travelMul)}</div></div></div>
-        <div className="g2"><div><div className="fl">Phát sinh</div><input type="number" value={form.travelExtra} onChange={function(e){uf("travelExtra",+e.target.value);}} className="fi"/></div><div><div className="fl">Ghi chú</div><input type="text" value={form.travelNote} onChange={function(e){uf("travelNote",e.target.value);}} className="fi" placeholder="Xăng..."/></div></div>
+        <div className="g2"><div><div className="fl">Phát sinh</div><input type="text" inputMode="numeric" value={fmM(form.travelExtra)} onChange={function(e){var v=e.target.value.replace(/[^\d]/g,"");uf("travelExtra",v?+v:0);}} className="fi" placeholder="0"/></div><div><div className="fl">Ghi chú</div><input type="text" value={form.travelNote} onChange={function(e){uf("travelNote",e.target.value);}} className="fi" placeholder="Xăng..."/></div></div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(76,175,80,.08)",borderRadius:16,padding:"16px 20px",marginBottom:16,border:"1px solid rgba(76,175,80,.2)"}}><span>Tổng</span><span style={{fontSize:20,fontWeight:800,color:"var(--grn)"}}>{vnd(form.salary+form.travelBase*form.travelMul+(form.travelExtra||0))}</span></div>
         <div style={{marginBottom:16}}><div className="fl">Ghi chú</div><textarea value={form.note} onChange={function(e){uf("note",e.target.value);}} className="fi" style={{minHeight:56}} placeholder="..."/></div>
 
@@ -393,7 +403,7 @@ function App(){
           </div>;})}
           <button onClick={addFiles} style={{width:76,height:76,borderRadius:12,border:"1.5px dashed var(--bd)",background:"transparent",color:"var(--t3)",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,fontFamily:"inherit",fontSize:11}}>📎<span>Thêm</span></button>
         </div>
-        <div style={{display:"flex",gap:10}}><button className="btn-m" style={{flex:1}} onClick={save}>✅ {eid?"Cập nhật":"Lưu"}</button><button className="btn-s" style={{flex:1}} onClick={function(){setTab("home");setEid(null);setForm(mk());}}>Huỷ</button></div>
+        <div style={{display:"flex",gap:10}}><button className="btn-m" style={{flex:1}} onClick={save}>✅ {eid?"Cập nhật":"Lưu"}</button><button className="btn-s" style={{flex:1}} onClick={function(){setTab("timeline");setEid(null);setForm(mk());}}>Huỷ</button></div>
       </div>}
 
       {/* PAY */}
@@ -412,6 +422,80 @@ function App(){
           <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:"var(--t3)"}}>{fd(e.date)}{e.round?" · "+e.round:""}</div><div style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(e.homeTeam||e.awayTeam)?e.homeTeam+" vs "+e.awayTeam:"—"}</div></div>
           <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:17,fontWeight:800,color:pd?"var(--grn)":"var(--t1)"}}>{vnd(amt)}</div><div style={{fontSize:12,fontWeight:700,color:pd?"var(--grn)":"var(--amb)"}}>{pd?"Đã nhận":"Chưa"}</div></div>
         </div>;})}</div>
+      </div>}
+
+      {/* TIMELINE - chỉ hiện trận chưa thu đủ */}
+      {tab==="timeline"&&<div>
+        <div className="sec-t">⏰ Trận cần thu tiền</div>
+        {(function(){
+          var unpaid=data.filter(function(e){return !e.salaryPaid||!e.travelPaid;});
+          unpaid.sort(function(a,b){return (a.date||"").localeCompare(b.date||"");});
+          if(unpaid.length===0)return <div className="crd" style={{textAlign:"center",padding:"40px 20px"}}>
+            <div style={{fontSize:54,marginBottom:10}}>🎉</div>
+            <div style={{fontSize:17,fontWeight:800,marginBottom:6}}>Đã thu đủ tất cả!</div>
+            <div style={{fontSize:13,color:"var(--t3)"}}>Không còn trận nào đợi thanh toán.</div>
+          </div>;
+          var totSal=unpaid.reduce(function(s,e){return s+(!e.salaryPaid?e.salary:0);},0);
+          var totTrv=unpaid.reduce(function(s,e){return s+(!e.travelPaid?tA(e):0);},0);
+          return <div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:18}}>
+              <div className="crd" style={{textAlign:"center",margin:0,padding:14,borderLeft:"3px solid var(--red)"}}>
+                <div style={{fontSize:10,color:"var(--t3)",fontWeight:700,letterSpacing:.5}}>SỐ TRẬN</div>
+                <div style={{fontSize:20,fontWeight:800,color:"var(--red)",marginTop:4}}>{unpaid.length}</div>
+              </div>
+              <div className="crd" style={{textAlign:"center",margin:0,padding:14,borderLeft:"3px solid var(--blu)"}}>
+                <div style={{fontSize:10,color:"var(--t3)",fontWeight:700,letterSpacing:.5}}>LƯƠNG VAR</div>
+                <div style={{fontSize:14,fontWeight:800,color:"var(--blu)",marginTop:4,whiteSpace:"nowrap"}}>{vnd(totSal)}</div>
+              </div>
+              <div className="crd" style={{textAlign:"center",margin:0,padding:14,borderLeft:"3px solid var(--amb)"}}>
+                <div style={{fontSize:10,color:"var(--t3)",fontWeight:700,letterSpacing:.5}}>CTP</div>
+                <div style={{fontSize:14,fontWeight:800,color:"var(--amb)",marginTop:4,whiteSpace:"nowrap"}}>{vnd(totTrv)}</div>
+              </div>
+            </div>
+            <div style={{position:"relative",paddingLeft:56}}>
+              {/* Wavy connecting line */}
+              <svg style={{position:"absolute",left:8,top:18,width:40,height:"calc(100% - 36px)",zIndex:0,overflow:"visible"}} preserveAspectRatio="none" viewBox={"0 0 40 "+(unpaid.length*150)}>
+                <path d={(function(){var p="M 20 0";for(var i=0;i<unpaid.length;i++){var y1=i*150+75,y2=i*150+150,cx=i%2===0?38:2;p+=" Q "+cx+" "+y1+" 20 "+y2;}return p;})()} stroke="url(#tlGrad)" strokeWidth="2.5" fill="none" strokeDasharray="5,5"/>
+                <defs>
+                  <linearGradient id="tlGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#F44336" stopOpacity=".8"/>
+                    <stop offset="100%" stopColor="#FF9800" stopOpacity=".5"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+              {unpaid.map(function(e,i){
+                var both=!e.salaryPaid&&!e.travelPaid;
+                var clr=both?"var(--red)":!e.salaryPaid?"var(--blu)":"var(--amb)";
+                var vName=e.venue==="Khác"?e.customVenue:e.venue;
+                var vs=VS[e.venue]||{a:(e.customVenue||"?").substring(0,3).toUpperCase(),c:"#455A64"};
+                var fs=vs.a.length>=4?10:vs.a.length===3?12:15;
+                var teams=(e.homeTeam||e.awayTeam)?(e.homeTeam||"?")+" vs "+(e.awayTeam||"?"):"";
+                return <div key={e.id} style={{position:"relative",marginBottom:18,zIndex:1}}>
+                  <div style={{position:"absolute",left:-50,top:18,width:40,height:40,borderRadius:"50%",background:vs.c,border:"3px solid "+clr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:fs,fontWeight:800,color:"#fff",letterSpacing:.3,zIndex:2,boxShadow:"0 4px 12px rgba(0,0,0,.4)"}}>{vs.a}</div>
+                  <button onClick={function(){ed(e);}} className="crd" style={{margin:0,width:"100%",textAlign:"left",cursor:"pointer",borderLeft:"4px solid "+clr,fontFamily:"inherit",color:"var(--t1)",padding:"14px 16px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8,flexWrap:"wrap"}}>
+                      <div style={{flex:"1 1 auto",minWidth:0}}>
+                        <div style={{fontSize:11,color:"var(--t3)",fontWeight:700,letterSpacing:.3,textTransform:"uppercase"}}>{fd(e.date)}</div>
+                        <div style={{fontSize:15,fontWeight:800,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📍 {vName||"—"}</div>
+                      </div>
+                      {(e.competition||e.round)&&<div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}>
+                        {e.competition&&<span style={{background:"rgba(76,175,80,.15)",color:"var(--grn)",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>🏆 {e.competition}</span>}
+                        {e.round&&<span style={{background:"rgba(66,165,245,.15)",color:"var(--blu)",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{e.round}</span>}
+                      </div>}
+                    </div>
+                    {teams&&<div style={{fontSize:13,color:"var(--t2)",marginBottom:10}}>⚽ {teams}</div>}
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {!e.salaryPaid&&<span style={{background:"rgba(66,165,245,.12)",color:"var(--blu)",border:"1px solid rgba(66,165,245,.3)",borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:700}}>💰 Lương: {vnd(e.salary)}</span>}
+                      {!e.travelPaid&&<span style={{background:"rgba(255,152,0,.12)",color:"var(--amb)",border:"1px solid rgba(255,152,0,.3)",borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:700}}>🚗 CTP: {vnd(tA(e))}</span>}
+                    </div>
+                    {!e.travelPaid&&e.travelExtra>0&&<div style={{fontSize:11,color:"var(--t3)",marginTop:6,fontStyle:"italic"}}>= {vnd(e.travelBase)} × {e.travelMul} + {vnd(e.travelExtra)}{e.travelNote?" ("+e.travelNote+")":" phát sinh"}</div>}
+                    {e.note&&<div style={{fontSize:12,color:"var(--t2)",marginTop:10,paddingTop:10,borderTop:"1px dashed var(--bd)",lineHeight:1.4}}>📝 {e.note}</div>}
+                  </button>
+                </div>;
+              })}
+            </div>
+          </div>;
+        })()}
       </div>}
 
       {/* STATS */}
@@ -441,7 +525,7 @@ function App(){
         </div>}
       </div>}
     </main>
-    {tab==="home"&&<button className="fab" onClick={function(){setTab("add");setForm(mk());setEid(null);}}>➕</button>}
+    {(tab==="home"||tab==="timeline")&&<button className="fab" onClick={function(){setTab("add");setForm(mk());setEid(null);}}>➕</button>}
   </div>;
 }
 
