@@ -13,14 +13,18 @@
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#121212;--c1:#1E1E1E;--c2:#252525;--bd:#2E2E2E;--t1:rgba(255,255,255,.87);--t2:rgba(255,255,255,.6);--t3:rgba(255,255,255,.38);--grn:#4CAF50;--grn2:#2E7D32;--amb:#FF9800;--red:#F44336;--blu:#42A5F5}
+:root{--bg:#121212;--c1:#1E1E1E;--c2:#252525;--bd:#2E2E2E;--t1:rgba(255,255,255,.87);--t2:rgba(255,255,255,.6);--t3:rgba(255,255,255,.38);--grn:#4CAF50;--grn2:#2E7D32;--amb:#FF9800;--red:#F44336;--blu:#42A5F5;--ovBg:rgba(0,0,0,.8);--shd:0 8px 32px rgba(0,0,0,.5);--fab-shd:0 4px 20px rgba(76,175,80,.35);color-scheme:dark}
+@media(prefers-color-scheme:light){
+  :root{--bg:#F7F8FA;--c1:#FFFFFF;--c2:#F0F2F5;--bd:#E1E4E8;--t1:rgba(0,0,0,.87);--t2:rgba(0,0,0,.62);--t3:rgba(0,0,0,.42);--grn:#2E7D32;--grn2:#1B5E20;--amb:#E65100;--red:#C62828;--blu:#1565C0;--ovBg:rgba(0,0,0,.55);--shd:0 4px 16px rgba(0,0,0,.12);--fab-shd:0 4px 16px rgba(46,125,50,.3);color-scheme:light}
+  input[type="date"]::-webkit-calendar-picker-indicator{filter:none}
+}
 body{font-family:'Be Vietnam Pro',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;-webkit-tap-highlight-color:transparent}
 @keyframes sp{to{transform:rotate(360deg)}}
 @keyframes fadeIn{from{opacity:0;transform:translate(-50%,-16px)}to{opacity:1;transform:translate(-50%,0)}}
 input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.8)}
 select{appearance:auto}textarea{resize:vertical}
 
-.toast{position:fixed;top:env(safe-area-inset-top,8px);left:50%;transform:translateX(-50%);z-index:9999;background:var(--c1);border:1px solid var(--bd);border-radius:14px;padding:12px 24px;font-size:15px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);animation:fadeIn .25s;max-width:92vw;text-align:center}
+.toast{position:fixed;top:env(safe-area-inset-top,8px);left:50%;transform:translateX(-50%);z-index:9999;background:var(--c1);border:1px solid var(--bd);border-radius:14px;padding:12px 24px;font-size:15px;font-weight:600;box-shadow:var(--shd);animation:fadeIn .25s;max-width:92vw;text-align:center}
 .hdr{background:var(--grn2);padding:16px;padding-top:calc(env(safe-area-inset-top,8px)+12px)}
 .hdr-in{display:flex;justify-content:space-between;align-items:center;max-width:700px;margin:0 auto}
 .nav{display:flex;background:var(--c1);border-bottom:1px solid var(--bd);padding:4px;position:sticky;top:0;z-index:100}
@@ -42,8 +46,8 @@ select{appearance:auto}textarea{resize:vertical}
 .pay-t.ok{background:rgba(76,175,80,.12);color:var(--grn)}
 .pay-t.no{background:rgba(255,152,0,.12);color:var(--amb)}
 .cbtn{background:var(--c2);border:1px solid var(--bd);border-radius:12px;padding:10px 18px;color:var(--t2);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;min-height:44px}
-.fab{position:fixed;bottom:24px;right:16px;width:60px;height:60px;border-radius:50%;background:var(--grn);color:#fff;border:none;cursor:pointer;font-size:22px;box-shadow:0 4px 20px rgba(76,175,80,.35);display:flex;align-items:center;justify-content:center;z-index:100}
-.ov{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:5000;display:flex;align-items:center;justify-content:center;padding:16px}
+.fab{position:fixed;bottom:24px;right:16px;width:60px;height:60px;border-radius:50%;background:var(--grn);color:#fff;border:none;cursor:pointer;font-size:22px;box-shadow:var(--fab-shd);display:flex;align-items:center;justify-content:center;z-index:100}
+.ov{position:fixed;inset:0;background:var(--ovBg);z-index:5000;display:flex;align-items:center;justify-content:center;padding:16px}
 .sync-btn{background:none;border:none;color:rgba(255,255,255,.7);font-size:18px;cursor:pointer;padding:8px}
 .sync-spin{animation:sp 1s linear infinite}
 @media(min-width:768px){.fi{font-size:17px;padding:16px 18px}.btn-m,.btn-s{font-size:17px;min-height:58px}.nb{padding:10px 8px}.nb-i{font-size:20px}.nb-l{font-size:12px}}
@@ -81,6 +85,8 @@ var DW=["T2","T3","T4","T5","T6","T7","CN"];
 function vnd(n){return new Intl.NumberFormat("vi-VN").format(n)+"đ";}
 function fmM(n){return n?new Intl.NumberFormat("vi-VN").format(n):"";}
 function fd(s){if(!s)return"";var d=new Date(s),w=["CN","T2","T3","T4","T5","T6","T7"];return w[d.getDay()]+", "+String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
+// Normalize any date string (ISO or YYYY-MM-DD) to local YYYY-MM-DD
+function nDate(s){if(!s)return"";var d=new Date(s);if(isNaN(d))return s;return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
 function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",round:"",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,note:"",files:[],updatedAt:Date.now()};}
 function tA(e){return e.travelBase*e.travelMul+(e.travelExtra||0);}
 function compress(url,mx){mx=mx||1200;return new Promise(function(r){var i=new Image();i.onload=function(){var c=document.createElement("canvas"),s=i.width>mx?mx/i.width:1;c.width=i.width*s;c.height=i.height*s;c.getContext("2d").drawImage(i,0,0,c.width,c.height);r(c.toDataURL("image/jpeg",.7));};i.onerror=function(){r(url);};i.src=url;});}
@@ -238,14 +244,14 @@ function App(){
   function calPrev(){if(calM===0){setCalM(11);setCalY(calY-1);}else setCalM(calM-1);setCalSel(null);}
   function calNext(){if(calM===11){setCalM(0);setCalY(calY+1);}else setCalM(calM+1);setCalSel(null);}
 
-  if(!loaded)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#121212"}}><div style={{width:40,height:40,border:"3px solid #333",borderTopColor:"#4CAF50",borderRadius:"50%",animation:"sp .7s linear infinite"}}/></div>;
+  if(!loaded)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)"}}><div style={{width:40,height:40,border:"3px solid var(--bd)",borderTopColor:"var(--grn)",borderRadius:"50%",animation:"sp .7s linear infinite"}}/></div>;
 
   var s=gs(),list=fl(),cm=calMap();
   var dim=new Date(calY,calM+1,0).getDate();
   var fd0=(new Date(calY,calM,1).getDay()+6)%7;
   var isImg=function(f){return f&&f.type&&f.type.startsWith("image/");};
   var isPdf=function(f){return f&&f.type==="application/pdf";};
-  var selE=calSel?data.filter(function(e){return e.date===calSel;}):[];
+  var selE=calSel?data.filter(function(e){return nDate(e.date)===calSel;}):[];
 
   function applyPreset(p){
     setPreset(p);
@@ -271,7 +277,7 @@ function App(){
     {toast&&<div className="toast">{toast}</div>}
 
     {preview&&<div className="ov" onClick={function(){setPreview(null);}}><div onClick={function(e){e.stopPropagation();}} style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
-      <button onClick={function(){setPreview(null);}} aria-label="Đóng xem trước" style={{position:"absolute",top:-8,right:-8,width:36,height:36,borderRadius:"50%",background:"var(--c1)",border:"1px solid var(--bd)",color:"#fff",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:10}}>✕</button>
+      <button onClick={function(){setPreview(null);}} aria-label="Đóng xem trước" style={{position:"absolute",top:-8,right:-8,width:36,height:36,borderRadius:"50%",background:"var(--c1)",border:"1px solid var(--bd)",color:"var(--t1)",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:10}}>✕</button>
       {isImg(preview)&&<img src={preview.data} alt="" style={{maxWidth:"100%",maxHeight:"72vh",borderRadius:14}}/>}
       {isPdf(preview)&&<iframe src={preview.data} title="PDF" style={{width:"90vw",maxWidth:600,height:"70vh",border:"none",borderRadius:14,background:"#fff"}}/>}
       <button onClick={function(){dlFile(preview.data,preview.name);}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 24px",fontSize:15,fontWeight:700,color:"var(--blu)",cursor:"pointer"}}>⬇ Tải về</button>
