@@ -132,6 +132,7 @@ function App(){
   var[dTo,setDTo]=React.useState("");
   var[preset,setPreset]=React.useState("");
   var[search,setSearch]=React.useState("");
+  var[showPaid,setShowPaid]=React.useState(false);
   var[sType,setSType]=React.useState("travel");
   var[loaded,setLoaded]=React.useState(false);
   var[delId,setDelId]=React.useState(null);
@@ -480,11 +481,31 @@ function App(){
           {(sType==="travel"?[["Tổng CTP",s.tT,""],["Đã nhận",s.pT,"var(--grn)"],["Chưa nhận",s.uT,"var(--amb)"]]:[["Tổng lương",s.tS,""],["Đã nhận",s.pS,"var(--grn)"],["Chưa nhận",s.uS,"var(--amb)"]]).map(function(r,i){return <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",fontSize:15,color:r[2]||"var(--t1)"}}><span>{r[0]}</span><span style={{fontWeight:700}}>{vnd(r[1])}</span></div>;})}
           <button className="btn-m" style={{marginTop:14}} onClick={function(){mAll(sType==="travel"?"travelPaid":"salaryPaid");}}>✅ Đánh dấu tất cả</button>
         </div>}
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>{list.map(function(e){var pd=sType==="travel"?e.travelPaid:e.salaryPaid,fld=sType==="travel"?"travelPaid":"salaryPaid",amt=sType==="travel"?tA(e):e.salary;return <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,background:"var(--c1)",borderRadius:16,padding:"14px 16px",border:"1px solid var(--bd)",opacity:pd?.4:1}}>
-          <button onClick={function(){tp(e.id,fld);}} style={{width:34,height:34,borderRadius:10,border:"2px solid "+(pd?"var(--grn)":"var(--bd)"),background:pd?"var(--grn)":"var(--c2)",color:pd?"#fff":"var(--t3)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,flexShrink:0,fontFamily:"inherit"}}>{pd?"✅":"○"}</button>
-          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:"var(--t3)"}}>{fd(e.date)}{e.competition?" · "+e.competition:""}{e.round?" · "+e.round:""}</div><div style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📍 {e.venue==="Khác"?(e.customVenue||"—"):(e.venue||"—")}</div></div>
-          <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:17,fontWeight:800,color:pd?"var(--grn)":"var(--t1)"}}>{vnd(amt)}</div><div style={{fontSize:12,fontWeight:700,color:pd?"var(--grn)":"var(--amb)"}}>{pd?"Đã nhận":"Chưa"}</div></div>
-        </div>;})}</div>
+        {(function(){
+          var fld=sType==="travel"?"travelPaid":"salaryPaid";
+          var sorted=list.slice().sort(function(a,b){return (b.date||"").localeCompare(a.date||"");});
+          var unpaidL=sorted.filter(function(e){return !e[fld];});
+          var paidL=sorted.filter(function(e){return e[fld];});
+          var renderRow=function(e){var pd=e[fld],amt=sType==="travel"?tA(e):e.salary;return <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,background:"var(--c1)",borderRadius:16,padding:"14px 16px",border:"1px solid var(--bd)",opacity:pd?.5:1}}>
+            <button onClick={function(){tp(e.id,fld);}} aria-label={pd?"Bỏ đánh dấu":"Đánh dấu đã nhận"} style={{width:34,height:34,borderRadius:10,border:"2px solid "+(pd?"var(--grn)":"var(--bd)"),background:pd?"var(--grn)":"var(--c2)",color:pd?"#fff":"var(--t3)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,flexShrink:0,fontFamily:"inherit"}}>{pd?"✅":"○"}</button>
+            <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:"var(--t3)"}}>{fd(e.date)}{e.competition?" · "+e.competition:""}{e.round?" · "+e.round:""}</div><div style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📍 {e.venue==="Khác"?(e.customVenue||"—"):(e.venue||"—")}</div></div>
+            <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:17,fontWeight:800,color:pd?"var(--grn)":"var(--t1)"}}>{vnd(amt)}</div><div style={{fontSize:12,fontWeight:700,color:pd?"var(--grn)":"var(--amb)"}}>{pd?"Đã nhận":"Chưa"}</div></div>
+          </div>;};
+          return <div>
+            {unpaidL.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+              <div style={{fontSize:11,color:"var(--amb)",fontWeight:800,letterSpacing:.5,padding:"0 4px"}}>CHƯA NHẬN ({unpaidL.length})</div>
+              {unpaidL.map(renderRow)}
+            </div>}
+            {paidL.length>0&&<div>
+              <button onClick={function(){setShowPaid(!showPaid);}} style={{width:"100%",background:"var(--c2)",border:"1px dashed var(--bd)",borderRadius:12,padding:"10px 14px",color:"var(--t2)",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showPaid?8:0}}>
+                <span>✅ Đã nhận ({paidL.length})</span>
+                <span style={{fontSize:11,color:"var(--t3)"}}>{showPaid?"▲ Ẩn":"▼ Hiện"}</span>
+              </button>
+              {showPaid&&<div style={{display:"flex",flexDirection:"column",gap:8}}>{paidL.map(renderRow)}</div>}
+            </div>}
+            {unpaidL.length===0&&paidL.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"var(--t3)"}}>Không có trận nào</div>}
+          </div>;
+        })()}
       </div>}
 
       {/* TIMELINE - chỉ hiện trận chưa thu đủ */}
