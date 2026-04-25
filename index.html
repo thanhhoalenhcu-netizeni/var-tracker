@@ -130,6 +130,8 @@ function App(){
   var[form,setForm]=React.useState(mk());
   var[dFrom,setDFrom]=React.useState("");
   var[dTo,setDTo]=React.useState("");
+  var[preset,setPreset]=React.useState("");
+  var[search,setSearch]=React.useState("");
   var[sType,setSType]=React.useState("travel");
   var[loaded,setLoaded]=React.useState(false);
   var[delId,setDelId]=React.useState(null);
@@ -216,7 +218,14 @@ function App(){
   function tp(id,f){setData(function(p){return p.map(function(e){if(e.id===id){var n=Object.assign({},e);n[f]=!n[f];n.updatedAt=Date.now();return n;}return e;});});}
   function mAll(f){var ids={};fl().forEach(function(e){ids[e.id]=1;});var now=Date.now();setData(function(p){return p.map(function(e){if(ids[e.id]){var n=Object.assign({},e);n[f]=true;n.updatedAt=now;return n;}return e;});});notify("✅ Xong");}
 
-  var fl=React.useCallback(function(){var r=data.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});if(dFrom)r=r.filter(function(e){return e.date>=dFrom;});if(dTo)r=r.filter(function(e){return e.date<=dTo;});return r;},[data,dFrom,dTo]);
+  var fl=React.useCallback(function(){
+    var r=data.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+    if(dFrom)r=r.filter(function(e){return e.date>=dFrom;});
+    if(dTo)r=r.filter(function(e){return e.date<=dTo;});
+    if(preset==="unpaid")r=r.filter(function(e){return !e.salaryPaid||!e.travelPaid;});
+    if(search){var q=search.toLowerCase().trim();r=r.filter(function(e){return [e.homeTeam,e.awayTeam,e.venue,e.customVenue,e.competition,e.round,e.note].some(function(v){return v&&v.toLowerCase().indexOf(q)>-1;});});}
+    return r;
+  },[data,dFrom,dTo,preset,search]);
   var gs=React.useCallback(function(){var f=fl(),tS=0,pS=0,tT=0,pT=0;f.forEach(function(e){tS+=e.salary;if(e.salaryPaid)pS+=e.salary;tT+=tA(e);if(e.travelPaid)pT+=tA(e);});return{n:f.length,tS:tS,pS:pS,uS:tS-pS,tT:tT,pT:pT,uT:tT-pT,tot:tS+tT,pd:pS+pT,up:tS+tT-pS-pT};},[fl]);
 
   function addFiles(){if(fileRef.current)fileRef.current.click();}
@@ -237,13 +246,31 @@ function App(){
   var isPdf=function(f){return f&&f.type==="application/pdf";};
   var selE=calSel?data.filter(function(e){return e.date===calSel;}):[];
 
-  var Filter=<div className="flt"><input type="date" value={dFrom} onChange={function(e){setDFrom(e.target.value);}} className="di"/><span style={{color:"var(--t3)",fontWeight:700}}>→</span><input type="date" value={dTo} onChange={function(e){setDTo(e.target.value);}} className="di"/>{(dFrom||dTo)&&<button onClick={function(){setDFrom("");setDTo("");}} style={{background:"rgba(244,67,54,.15)",border:"1px solid rgba(244,67,54,.3)",borderRadius:10,padding:"8px 12px",color:"var(--red)",fontSize:13,cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>✕</button>}</div>;
+  function applyPreset(p){
+    setPreset(p);
+    var t=new Date(),y=t.getFullYear(),m=t.getMonth();
+    var pad=function(n){return String(n).padStart(2,"0");};
+    var ymd=function(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());};
+    if(p==="thismonth"){setDFrom(ymd(new Date(y,m,1)));setDTo(ymd(new Date(y,m+1,0)));}
+    else if(p==="lastmonth"){setDFrom(ymd(new Date(y,m-1,1)));setDTo(ymd(new Date(y,m,0)));}
+    else if(p==="next7"){setDFrom(ymd(t));setDTo(ymd(new Date(t.getTime()+7*86400000)));}
+    else if(p==="all"){setDFrom("");setDTo("");}
+    else if(p==="unpaid"){setDFrom("");setDTo("");}
+  }
+  var presetBtns=[{id:"thismonth",lb:"Tháng này"},{id:"lastmonth",lb:"Tháng trước"},{id:"next7",lb:"7 ngày tới"},{id:"unpaid",lb:"Chưa thu"},{id:"all",lb:"Tất cả"}];
+
+  var Filter=<div style={{marginBottom:14}}>
+    <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:8,WebkitOverflowScrolling:"touch"}}>
+      {presetBtns.map(function(p){var on=preset===p.id;return <button key={p.id} onClick={function(){applyPreset(on?"":p.id);}} style={{background:on?"var(--grn)":"var(--c2)",color:on?"#fff":"var(--t2)",border:"1px solid "+(on?"var(--grn)":"var(--bd)"),borderRadius:20,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{p.lb}</button>;})}
+    </div>
+    <div className="flt"><input type="date" value={dFrom} onChange={function(e){setDFrom(e.target.value);setPreset("");}} className="di"/><span style={{color:"var(--t3)",fontWeight:700}}>→</span><input type="date" value={dTo} onChange={function(e){setDTo(e.target.value);setPreset("");}} className="di"/>{(dFrom||dTo||preset)&&<button onClick={function(){setDFrom("");setDTo("");setPreset("");}} aria-label="Xoá bộ lọc" style={{background:"rgba(244,67,54,.15)",border:"1px solid rgba(244,67,54,.3)",borderRadius:10,padding:"8px 12px",color:"var(--red)",fontSize:13,cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>✕</button>}</div>
+  </div>;
 
   return <div>
     {toast&&<div className="toast">{toast}</div>}
 
     {preview&&<div className="ov" onClick={function(){setPreview(null);}}><div onClick={function(e){e.stopPropagation();}} style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
-      <button onClick={function(){setPreview(null);}} style={{position:"absolute",top:-8,right:-8,width:36,height:36,borderRadius:"50%",background:"var(--c1)",border:"1px solid var(--bd)",color:"#fff",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:10}}>✕</button>
+      <button onClick={function(){setPreview(null);}} aria-label="Đóng xem trước" style={{position:"absolute",top:-8,right:-8,width:36,height:36,borderRadius:"50%",background:"var(--c1)",border:"1px solid var(--bd)",color:"#fff",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:10}}>✕</button>
       {isImg(preview)&&<img src={preview.data} alt="" style={{maxWidth:"100%",maxHeight:"72vh",borderRadius:14}}/>}
       {isPdf(preview)&&<iframe src={preview.data} title="PDF" style={{width:"90vw",maxWidth:600,height:"70vh",border:"none",borderRadius:14,background:"#fff"}}/>}
       <button onClick={function(){dlFile(preview.data,preview.name);}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 24px",fontSize:15,fontWeight:700,color:"var(--blu)",cursor:"pointer"}}>⬇ Tải về</button>
@@ -268,13 +295,21 @@ function App(){
         <div style={{fontSize:28,width:44,height:44,background:"rgba(255,255,255,.15)",borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center"}}>⚽</div>
         <div><div style={{fontSize:20,fontWeight:800,color:"#fff"}}>VAR Tracker</div><div style={{fontSize:13,color:"rgba(255,255,255,.7)"}}>Trưởng xe · Quang</div></div>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:8}}>
-        {SYNC_URL&&<div style={{display:"flex",alignItems:"center",gap:4}}>
-          {lastSync&&<span style={{fontSize:10,color:"rgba(255,255,255,.6)",fontWeight:600}}>{fmtTime(lastSync)}</span>}
-          <button onClick={doSync} className="sync-btn" title={lastSync?"Đồng bộ lần cuối: "+fmtTime(lastSync):"Đồng bộ"}><span className={syncing?"sync-spin":""}>🔄</span></button>
-        </div>}
-        <div style={{background:"rgba(255,255,255,.15)",borderRadius:20,padding:"6px 16px",fontSize:14,color:"#fff",fontWeight:700}}>{data.length}</div>
-      </div>
+      {(function(){
+        var unpaid=data.filter(function(e){return !e.salaryPaid||!e.travelPaid;});
+        var totUnpaid=unpaid.reduce(function(s,e){return s+(!e.salaryPaid?e.salary:0)+(!e.travelPaid?tA(e):0);},0);
+        return <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {SYNC_URL&&<div style={{display:"flex",alignItems:"center",gap:4}}>
+            {lastSync&&<span style={{fontSize:10,color:"rgba(255,255,255,.6)",fontWeight:600}}>{fmtTime(lastSync)}</span>}
+            <button onClick={doSync} className="sync-btn" aria-label="Đồng bộ dữ liệu" title={lastSync?"Đồng bộ lần cuối: "+fmtTime(lastSync):"Đồng bộ"}><span className={syncing?"sync-spin":""}>🔄</span></button>
+          </div>}
+          <button onClick={function(){setTab("timeline");}} style={{background:totUnpaid>0?"rgba(255,152,0,.25)":"rgba(76,175,80,.25)",border:"1px solid "+(totUnpaid>0?"rgba(255,152,0,.5)":"rgba(76,175,80,.5)"),borderRadius:14,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit",textAlign:"right",lineHeight:1.15}} aria-label="Xem trận cần thu">
+            <div style={{fontSize:9,color:"rgba(255,255,255,.85)",fontWeight:700,letterSpacing:.4}}>{totUnpaid>0?"CÒN THU":"ĐÃ THU ĐỦ"}</div>
+            <div style={{fontSize:14,color:"#fff",fontWeight:800,whiteSpace:"nowrap"}}>{totUnpaid>0?vnd(totUnpaid):"🎉"}</div>
+            {totUnpaid>0&&<div style={{fontSize:9,color:"rgba(255,255,255,.7)",fontWeight:600}}>{unpaid.length} trận</div>}
+          </button>
+        </div>;
+      })()}
     </div></header>
 
     {/* Nav */}
@@ -294,6 +329,11 @@ function App(){
           <div className="crd" style={{textAlign:"center",marginBottom:0,borderColor:"rgba(255,152,0,.3)"}}><div style={{fontSize:22,fontWeight:800,color:"var(--amb)"}}>{vnd(s.up)}</div><div style={{fontSize:13,color:"var(--t2)",marginTop:4}}>Chưa nhận</div></div>
         </div>}
         <div className="sec-t">Danh sách</div>
+        <div style={{position:"relative",marginBottom:14}}>
+          <span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",fontSize:15,color:"var(--t3)",pointerEvents:"none"}}>🔍</span>
+          <input type="text" value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="Tìm đội, sân, giải, vòng..." style={{width:"100%",background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:14,padding:"12px 40px 12px 40px",fontSize:14,color:"var(--t1)",fontFamily:"inherit",boxSizing:"border-box"}} aria-label="Tìm kiếm trận"/>
+          {search&&<button onClick={function(){setSearch("");}} aria-label="Xoá tìm kiếm" style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"var(--t3)",fontSize:18,cursor:"pointer",padding:6,fontFamily:"inherit"}}>✕</button>}
+        </div>
         {Filter}
         {list.length===0?<div style={{textAlign:"center",padding:"60px 20px"}}><div style={{fontSize:56,marginBottom:16}}>⚽</div><div style={{fontSize:18,color:"var(--t2)",marginBottom:24}}>Chưa có trận nào</div><button className="btn-m" onClick={function(){setTab("add");setForm(mk());setEid(null);}}>➕ Thêm trận</button></div>:
         <div style={{display:"flex",flexDirection:"column",gap:12}}>{list.map(function(e){return <div key={e.id} className="crd">
@@ -319,7 +359,7 @@ function App(){
           <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14,borderTop:"1px solid var(--bd)",paddingTop:12}}>
             <button className="cbtn" onClick={function(){ed(e);}}>✏️ Sửa</button>
             {delId===e.id?<><button className="cbtn" style={{color:"var(--red)"}} onClick={function(){rm(e.id);}}>Xác nhận?</button><button className="cbtn" onClick={function(){setDelId(null);}}>Huỷ</button></>:
-            <button className="cbtn" style={{color:"var(--red)"}} onClick={function(){setDelId(e.id);}}>🗑️</button>}
+            <button className="cbtn" aria-label="Xoá trận" style={{color:"var(--red)"}} onClick={function(){setDelId(e.id);}}>🗑️</button>}
           </div>
         </div>;})}</div>}
       </div>}
@@ -341,14 +381,37 @@ function App(){
             {Array.from({length:dim}).map(function(_,i){
               var day=i+1;
               var ds=calY+"-"+String(calM+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
-              var has=(cm[day]||[]).length>0;
+              var dEvts=cm[day]||[];
               var sel=calSel===ds;
               var today=day===now.getDate()&&calM===now.getMonth()&&calY===now.getFullYear();
+              // Determine worst payment status across day's matches
+              var dotClr="";
+              if(dEvts.length>0){
+                var anyFull=false,anyPartial=false,anyNone=false;
+                dEvts.forEach(function(e){
+                  var sp=e.salaryPaid,tp=e.travelPaid;
+                  if(sp&&tp)anyFull=true;
+                  else if(!sp&&!tp)anyNone=true;
+                  else anyPartial=true;
+                });
+                // Priority: if any unpaid, show red; else if any partial, show orange; else green
+                if(anyNone)dotClr="var(--red)";
+                else if(anyPartial)dotClr="var(--amb)";
+                else dotClr="var(--grn2)";
+              }
               return <button key={day} onClick={function(){setCalSel(sel?null:ds);}} style={{position:"relative",aspectRatio:"1",borderRadius:12,border:sel?"2px solid var(--grn)":today?"2px solid var(--t3)":"1px solid transparent",background:sel?"rgba(76,175,80,.15)":"transparent",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:sel?"var(--grn)":"var(--t1)",fontFamily:"inherit",fontSize:15,fontWeight:today||sel?800:500,padding:0}}>
                 {day}
-                {has&&<div style={{width:6,height:6,borderRadius:3,background:sel?"var(--grn)":"var(--amb)",position:"absolute",bottom:4}}/>}
+                {dEvts.length>0&&<div style={{display:"flex",gap:2,position:"absolute",bottom:4,alignItems:"center"}}>
+                  <div style={{width:6,height:6,borderRadius:3,background:dotClr}}/>
+                  {dEvts.length>1&&<span style={{fontSize:8,fontWeight:800,color:dotClr,marginLeft:1}}>{dEvts.length}</span>}
+                </div>}
               </button>;
             })}
+          </div>
+          <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:12,paddingTop:10,borderTop:"1px solid var(--bd)",fontSize:10,color:"var(--t3)",flexWrap:"wrap"}}>
+            <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:6,height:6,borderRadius:3,background:"var(--red)",display:"inline-block"}}/>Chưa thu</span>
+            <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:6,height:6,borderRadius:3,background:"var(--amb)",display:"inline-block"}}/>Một phần</span>
+            <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:6,height:6,borderRadius:3,background:"var(--grn2)",display:"inline-block"}}/>Đã thu đủ</span>
           </div>
         </div>
         {calSel?<div>
@@ -419,7 +482,7 @@ function App(){
         </div>}
         <div style={{display:"flex",flexDirection:"column",gap:8}}>{list.map(function(e){var pd=sType==="travel"?e.travelPaid:e.salaryPaid,fld=sType==="travel"?"travelPaid":"salaryPaid",amt=sType==="travel"?tA(e):e.salary;return <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,background:"var(--c1)",borderRadius:16,padding:"14px 16px",border:"1px solid var(--bd)",opacity:pd?.4:1}}>
           <button onClick={function(){tp(e.id,fld);}} style={{width:34,height:34,borderRadius:10,border:"2px solid "+(pd?"var(--grn)":"var(--bd)"),background:pd?"var(--grn)":"var(--c2)",color:pd?"#fff":"var(--t3)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,flexShrink:0,fontFamily:"inherit"}}>{pd?"✅":"○"}</button>
-          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:"var(--t3)"}}>{fd(e.date)}{e.round?" · "+e.round:""}</div><div style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(e.homeTeam||e.awayTeam)?e.homeTeam+" vs "+e.awayTeam:"—"}</div></div>
+          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:"var(--t3)"}}>{fd(e.date)}{e.competition?" · "+e.competition:""}{e.round?" · "+e.round:""}</div><div style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📍 {e.venue==="Khác"?(e.customVenue||"—"):(e.venue||"—")}</div></div>
           <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:17,fontWeight:800,color:pd?"var(--grn)":"var(--t1)"}}>{vnd(amt)}</div><div style={{fontSize:12,fontWeight:700,color:pd?"var(--grn)":"var(--amb)"}}>{pd?"Đã nhận":"Chưa"}</div></div>
         </div>;})}</div>
       </div>}
@@ -525,7 +588,7 @@ function App(){
         </div>}
       </div>}
     </main>
-    {(tab==="home"||tab==="timeline")&&<button className="fab" onClick={function(){setTab("add");setForm(mk());setEid(null);}}>➕</button>}
+    {(tab==="home"||tab==="timeline")&&<button className="fab" aria-label="Thêm trận mới" onClick={function(){setTab("add");setForm(mk());setEid(null);}}>➕</button>}
   </div>;
 }
 
