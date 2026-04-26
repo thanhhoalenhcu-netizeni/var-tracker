@@ -475,14 +475,19 @@ function App(){
       {/* PAY */}
       {tab==="pay"&&<div>
         <div className="sec-t">💰 Thanh toán</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:0,marginBottom:16,background:"var(--c1)",borderRadius:14,padding:4,border:"1px solid var(--bd)"}}>
-          {["travel","salary"].map(function(t){return <button key={t} onClick={function(){setSType(t);}} style={{padding:14,border:"none",borderRadius:11,background:sType===t?"var(--grn2)":"transparent",color:sType===t?"#fff":"var(--t3)",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{t==="travel"?"Công tác phí":"Lương VAR"}</button>;})}
-        </div>
         {Filter}
         {list.length>0&&<div className="crd">
           {(sType==="travel"?[["Tổng CTP",s.tT,""],["Đã nhận",s.pT,"var(--grn)"],["Chưa nhận",s.uT,"var(--amb)"]]:[["Tổng lương",s.tS,""],["Đã nhận",s.pS,"var(--grn)"],["Chưa nhận",s.uS,"var(--amb)"]]).map(function(r,i){return <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",fontSize:15,color:r[2]||"var(--t1)"}}><span>{r[0]}</span><span style={{fontWeight:700}}>{vnd(r[1])}</span></div>;})}
           <button className="btn-m" style={{marginTop:14}} onClick={function(){mAll(sType==="travel"?"travelPaid":"salaryPaid");}}>✅ Đánh dấu tất cả</button>
         </div>}
+        {/* Switch toggle: chọn loại tiền hiển thị */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:14,padding:"10px 14px",marginBottom:14}}>
+          <span style={{fontSize:13,fontWeight:700,color:sType==="travel"?"var(--t1)":"var(--t3)"}}>🚗 Công tác phí</span>
+          <button onClick={function(){setSType(sType==="travel"?"salary":"travel");}} aria-label={"Chuyển sang "+(sType==="travel"?"Lương VAR":"Công tác phí")} style={{position:"relative",width:54,height:30,borderRadius:15,background:sType==="salary"?"var(--grn)":"var(--bd)",border:"none",cursor:"pointer",padding:0,transition:"background .2s",flexShrink:0,margin:"0 12px"}}>
+            <div style={{position:"absolute",top:3,left:sType==="salary"?27:3,width:24,height:24,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 2px 6px rgba(0,0,0,.3)"}}/>
+          </button>
+          <span style={{fontSize:13,fontWeight:700,color:sType==="salary"?"var(--t1)":"var(--t3)"}}>💰 Lương VAR</span>
+        </div>
         {(function(){
           var fld=sType==="travel"?"travelPaid":"salaryPaid";
           var sorted=list.slice().sort(function(a,b){return (b.date||"").localeCompare(a.date||"");});
