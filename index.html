@@ -593,7 +593,7 @@ function App(){
         <div className="sec-t">📊 Thống kê</div>
         {Filter}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
-          {[{l:"Trận",v:s.n,c:"var(--grn)",raw:1},{l:"Thu nhập",v:s.tot,c:"var(--grn)"},{l:"Đã nhận",v:s.pd,c:"var(--grn2)"},{l:"Chưa nhận",v:s.up,c:"var(--amb)"}].map(function(x,i){return <div key={i} style={{background:"var(--c1)",borderRadius:16,padding:18,border:"1px solid var(--bd)",borderLeft:"4px solid "+x.c}}><div style={{fontSize:11,color:"var(--t3)",textTransform:"uppercase",fontWeight:700}}>{x.l}</div><div style={{fontSize:22,fontWeight:800,color:x.c,marginTop:6}}>{x.raw?x.v:vnd(x.v)}</div></div>;})}
+          {[{l:"Trận",v:s.n,c:"var(--grn)",raw:1},{l:"Thu nhập",v:s.tot,c:"var(--grn)"},{l:"Đã nhận",v:s.pd,c:"var(--grn2)"},{l:"Chưa nhận",v:s.up,c:"var(--amb)"}].map(function(x,i){return <div key={i} style={{background:"var(--c1)",borderRadius:16,padding:14,border:"1px solid var(--bd)",borderLeft:"4px solid "+x.c,minWidth:0}}><div style={{fontSize:10,color:"var(--t3)",textTransform:"uppercase",fontWeight:700,letterSpacing:.3}}>{x.l}</div><div style={{fontSize:x.raw?20:16,fontWeight:800,color:x.c,marginTop:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{x.raw?x.v:vnd(x.v)}</div></div>;})}
         </div>
         {list.length>0&&(function(){
           var grp={};list.forEach(function(e){var k=e.competition||"Khác";if(!grp[k])grp[k]={n:0,inc:0,rounds:{}};grp[k].n++;grp[k].inc+=e.salary+tA(e);var r=e.round||"(chưa rõ)";if(!grp[k].rounds[r])grp[k].rounds[r]=0;grp[k].rounds[r]++;});
