@@ -134,7 +134,7 @@ function smartMerge(cloud,local){
 
 function App(){
   var[data,setData]=React.useState([]);
-  var[tab,setTab]=React.useState("timeline");
+  var[tab,setTab]=React.useState("chart");
   var[eid,setEid]=React.useState(null);
   var[form,setForm]=React.useState(mk());
   var[dFrom,setDFrom]=React.useState("");
@@ -290,23 +290,28 @@ function App(){
   return <div>
     {toast&&<div className="toast">{toast}</div>}
 
-    {preview&&<div className="ov" onClick={function(){setPreview(null);}}><div onClick={function(e){e.stopPropagation();}} style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+    {preview&&<div className="ov" style={{zIndex:6000}} onClick={function(){setPreview(null);}}><div onClick={function(e){e.stopPropagation();}} style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:12,maxWidth:"100%"}}>
       <button onClick={function(){setPreview(null);}} aria-label="Đóng xem trước" style={{position:"absolute",top:-8,right:-8,width:36,height:36,borderRadius:"50%",background:"var(--c1)",border:"1px solid var(--bd)",color:"var(--t1)",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:10}}>✕</button>
-      {isImg(preview)&&<img src={previewURL||preview.data} alt="" style={{maxWidth:"100%",maxHeight:"72vh",borderRadius:14}}/>}
-      {isPdf(preview)&&previewURL&&<iframe src={previewURL} title="PDF" style={{width:"90vw",maxWidth:600,height:"70vh",border:"none",borderRadius:14,background:"#fff"}}/>}
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center"}}>
+      {!preview.data?<div style={{background:"var(--c1)",borderRadius:14,padding:"32px 24px",textAlign:"center",maxWidth:400,border:"1px solid var(--bd)"}}>
+        <div style={{fontSize:48,marginBottom:12}}>⚠️</div>
+        <div style={{fontSize:16,fontWeight:800,marginBottom:8,color:"var(--amb)"}}>File không có dữ liệu</div>
+        <div style={{fontSize:13,color:"var(--t2)",lineHeight:1.5}}>"{preview.name||"không tên"}" không có dữ liệu trên thiết bị này. File chỉ lưu cục bộ trên trình duyệt của thiết bị đã upload — có thể đã bị xoá khỏi bộ nhớ.</div>
+      </div>:null}
+      {preview.data&&isImg(preview)&&<img src={previewURL||preview.data} alt="" style={{maxWidth:"100%",maxHeight:"72vh",borderRadius:14}}/>}
+      {preview.data&&isPdf(preview)&&previewURL&&<iframe src={previewURL} title="PDF" style={{width:"90vw",maxWidth:600,height:"70vh",border:"none",borderRadius:14,background:"#fff"}}/>}
+      {preview.data&&<div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center"}}>
         {isPdf(preview)&&previewURL&&<button onClick={function(){window.open(previewURL,"_blank");}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 20px",fontSize:14,fontWeight:700,color:"var(--t1)",cursor:"pointer"}}>↗ Mở tab mới</button>}
         <button onClick={function(){dlFile(preview.data,preview.name);}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 24px",fontSize:15,fontWeight:700,color:"var(--blu)",cursor:"pointer"}}>⬇ Tải về</button>
-      </div>
+      </div>}
     </div></div>}
 
     {fModal&&<div className="ov" onClick={function(){setFModal(null);}}><div onClick={function(e){e.stopPropagation();}} style={{background:"var(--c1)",borderRadius:20,padding:24,maxWidth:500,width:"100%",maxHeight:"80vh",overflowY:"auto"}}>
       <div style={{fontSize:17,fontWeight:800,marginBottom:4}}>📁 File</div>
       <div style={{fontSize:13,color:"var(--t3)",marginBottom:16}}>{fd(fModal.date)}</div>
-      {(fModal.files||[]).map(function(f,i){return <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--bd)",gap:8}}>
-        <span style={{fontSize:14,color:"var(--t2)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{isPdf(f)?"📄":"🖼"} {f.name}</span>
+      {(fModal.files||[]).map(function(f,i){var miss=!f.data;return <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--bd)",gap:8,opacity:miss?.7:1}}>
+        <span style={{fontSize:14,color:"var(--t2)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{isPdf(f)?"📄":"🖼"} {f.name}{miss?<span style={{marginLeft:6,background:"rgba(255,152,0,.15)",color:"var(--amb)",borderRadius:6,padding:"2px 6px",fontSize:11,fontWeight:700}}>⚠ Mất</span>:""}</span>
         <button onClick={function(){setPreview(f);}} className="cbtn" style={{padding:"6px 12px",minHeight:36}}>Xem</button>
-        <button onClick={function(){dlFile(f.data,f.name);}} className="cbtn" style={{padding:"6px 12px",minHeight:36,color:"var(--blu)"}}>⬇</button>
+        <button onClick={function(){if(miss){notify("⚠️ File không có dữ liệu");return;}dlFile(f.data,f.name);}} className="cbtn" style={{padding:"6px 12px",minHeight:36,color:miss?"var(--t3)":"var(--blu)"}}>⬇</button>
       </div>;})}
       <button onClick={function(){setFModal(null);}} style={{width:"100%",marginTop:16,background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:14,padding:14,fontSize:15,fontWeight:700,color:"var(--t2)",cursor:"pointer"}}>Đóng</button>
     </div></div>}
