@@ -92,6 +92,9 @@ function tA(e){return e.travelBase*e.travelMul+(e.travelExtra||0);}
 function compress(url,mx){mx=mx||1200;return new Promise(function(r){var i=new Image();i.onload=function(){var c=document.createElement("canvas"),s=i.width>mx?mx/i.width:1;c.width=i.width*s;c.height=i.height*s;c.getContext("2d").drawImage(i,0,0,c.width,c.height);r(c.toDataURL("image/jpeg",.7));};i.onerror=function(){r(url);};i.src=url;});}
 function readF(f){return new Promise(function(r,j){var x=new FileReader();x.onload=function(){r(x.result);};x.onerror=j;x.readAsDataURL(f);});}
 function dlFile(u,n){var a=document.createElement("a");a.href=u;a.download=n;document.body.appendChild(a);a.click();document.body.removeChild(a);}
+// Convert data: URI to Blob URL (Chrome/Safari block data: URIs in iframes for security,
+// causing PDF preview to show a blank white page. Blob URLs are allowed.)
+function dataURItoBlobURL(u){try{if(!u||u.indexOf("data:")!==0)return u;var p=u.split(",");var m=(p[0].match(/data:([^;]+)/)||[,"application/octet-stream"])[1];var b=atob(p[1]);var a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return URL.createObjectURL(new Blob([a],{type:m}));}catch(e){return u;}}
 
 // Local storage
 function loadLocal(){try{var d=localStorage.getItem(STORE);return d?JSON.parse(d):[];}catch(e){return[];}}
@@ -148,6 +151,7 @@ function App(){
   var pushTimerRef=React.useRef(null);
   var pendingRef=React.useRef(false);
   var[preview,setPreview]=React.useState(null);
+  var[previewURL,setPreviewURL]=React.useState(null);
   var[fModal,setFModal]=React.useState(null);
   var now=new Date();
   var[calY,setCalY]=React.useState(now.getFullYear());
@@ -204,6 +208,16 @@ function App(){
     window.addEventListener("focus",onVis);
     return function(){document.removeEventListener("visibilitychange",onVis);window.removeEventListener("focus",onVis);};
   },[loaded]);
+
+  // Manage Blob URL for the file preview. data: URIs are blocked inside <iframe>
+  // by Chrome/Safari (which is why PDF preview was showing as a blank page);
+  // converting to a blob: URL fixes that, and we revoke when the preview closes.
+  React.useEffect(function(){
+    if(!preview||!preview.data){setPreviewURL(null);return;}
+    var url=dataURItoBlobURL(preview.data);
+    setPreviewURL(url);
+    return function(){if(url&&url.indexOf("blob:")===0){try{URL.revokeObjectURL(url);}catch(e){}}};
+  },[preview]);
 
   function doSync(){
     setSyncing(true);
@@ -278,9 +292,12 @@ function App(){
 
     {preview&&<div className="ov" onClick={function(){setPreview(null);}}><div onClick={function(e){e.stopPropagation();}} style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
       <button onClick={function(){setPreview(null);}} aria-label="Đóng xem trước" style={{position:"absolute",top:-8,right:-8,width:36,height:36,borderRadius:"50%",background:"var(--c1)",border:"1px solid var(--bd)",color:"var(--t1)",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:10}}>✕</button>
-      {isImg(preview)&&<img src={preview.data} alt="" style={{maxWidth:"100%",maxHeight:"72vh",borderRadius:14}}/>}
-      {isPdf(preview)&&<iframe src={preview.data} title="PDF" style={{width:"90vw",maxWidth:600,height:"70vh",border:"none",borderRadius:14,background:"#fff"}}/>}
-      <button onClick={function(){dlFile(preview.data,preview.name);}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 24px",fontSize:15,fontWeight:700,color:"var(--blu)",cursor:"pointer"}}>⬇ Tải về</button>
+      {isImg(preview)&&<img src={previewURL||preview.data} alt="" style={{maxWidth:"100%",maxHeight:"72vh",borderRadius:14}}/>}
+      {isPdf(preview)&&previewURL&&<iframe src={previewURL} title="PDF" style={{width:"90vw",maxWidth:600,height:"70vh",border:"none",borderRadius:14,background:"#fff"}}/>}
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center"}}>
+        {isPdf(preview)&&previewURL&&<button onClick={function(){window.open(previewURL,"_blank");}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 20px",fontSize:14,fontWeight:700,color:"var(--t1)",cursor:"pointer"}}>↗ Mở tab mới</button>}
+        <button onClick={function(){dlFile(preview.data,preview.name);}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 24px",fontSize:15,fontWeight:700,color:"var(--blu)",cursor:"pointer"}}>⬇ Tải về</button>
+      </div>
     </div></div>}
 
     {fModal&&<div className="ov" onClick={function(){setFModal(null);}}><div onClick={function(e){e.stopPropagation();}} style={{background:"var(--c1)",borderRadius:20,padding:24,maxWidth:500,width:"100%",maxHeight:"80vh",overflowY:"auto"}}>
@@ -317,7 +334,7 @@ function App(){
 
     {/* Nav */}
     <nav className="nav">
-      {[{id:"timeline",ic:"⏰",lb:"Cần thu"},{id:"home",ic:"📋",lb:"Danh sách"},{id:"cal",ic:"📅",lb:"Lịch"},{id:"add",ic:"➕",lb:eid?"Sửa":"Thêm"},{id:"pay",ic:"💰",lb:"Thanh toán"},{id:"chart",ic:"📊",lb:"Thống kê"}].map(function(t){
+      {[{id:"chart",ic:"📊",lb:"Thống kê"},{id:"cal",ic:"📅",lb:"Lịch"},{id:"timeline",ic:"⏰",lb:"Cần thu"},{id:"home",ic:"📋",lb:"Danh sách"},{id:"pay",ic:"💰",lb:"Thanh toán"},{id:"add",ic:"➕",lb:eid?"Sửa":"Thêm"}].map(function(t){
         return <button key={t.id} className={"nb"+(tab===t.id?" on":"")} onClick={function(){setTab(t.id);if(t.id==="add"&&!eid){setForm(mk());setEid(null);}}}>
           <span className="nb-i">{t.ic}</span><span className="nb-l">{t.lb}</span>
         </button>;
