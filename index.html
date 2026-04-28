@@ -95,6 +95,13 @@ function dlFile(u,n){var a=document.createElement("a");a.href=u;a.download=n;doc
 // Convert data: URI to Blob URL (Chrome/Safari block data: URIs in iframes for security,
 // causing PDF preview to show a blank white page. Blob URLs are allowed.)
 function dataURItoBlobURL(u){try{if(!u||u.indexOf("data:")!==0)return u;var p=u.split(",");var m=(p[0].match(/data:([^;]+)/)||[,"application/octet-stream"])[1];var b=atob(p[1]);var a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return URL.createObjectURL(new Blob([a],{type:m}));}catch(e){return u;}}
+// Robust file-data validity check (catches truncated/empty/corrupted data URIs that
+// would otherwise render as a blank iframe)
+function fOK(f){if(!f||typeof f.data!=="string")return false;if(f.data.length<50)return false;if(f.data.indexOf("data:")!==0)return false;var c=f.data.indexOf(",");return c>5&&(f.data.length-c-1)>20;}
+
+// Drive integration via Apps Script
+async function driveUpload(name,type,dataB64){if(!SYNC_URL)return null;try{var r=await fetch(SYNC_URL+"?action=uploadFile",{method:"POST",body:JSON.stringify({name:name,type:type,dataB64:dataB64}),headers:{"Content-Type":"text/plain"}});var j=await r.json();if(j&&j.ok&&j.id)return j.id;console.warn("Drive upload error:",j&&j.error);}catch(e){console.warn("Drive upload fail:",e);}return null;}
+async function driveDownload(id){if(!SYNC_URL||!id)return null;try{var r=await fetch(SYNC_URL+"?action=getFile&id="+encodeURIComponent(id));var j=await r.json();if(j&&j.ok&&j.data)return{data:j.data,name:j.name,type:j.type};console.warn("Drive download error:",j&&j.error);}catch(e){console.warn("Drive download fail:",e);}return null;}
 
 // Local storage
 function loadLocal(){try{var d=localStorage.getItem(STORE);return d?JSON.parse(d):[];}catch(e){return[];}}
@@ -108,13 +115,26 @@ async function syncPull(){
 async function syncPush(data){
   if(!SYNC_URL)return false;
   try{
-    // Don't push file data to sheets (too large)
-    var clean=data.map(function(e){return Object.assign({},e,{files:[]});});
+    // Keep file metadata (name/type/driveId) but strip heavy base64 data — file
+    // bytes live in Drive, identified by driveId; metadata is small enough for Sheets.
+    var clean=data.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});
     await fetch(SYNC_URL+"?action=save",{method:"POST",body:JSON.stringify(clean),headers:{"Content-Type":"text/plain"}});
     return true;
   }catch(e){console.warn("Push fail:",e);return false;}
 }
 function fmtTime(t){if(!t)return"";var d=new Date(t),now=new Date(),diff=(now-d)/1000;if(diff<60)return"vừa xong";if(diff<3600)return Math.floor(diff/60)+"p trước";if(diff<86400)return Math.floor(diff/3600)+"h trước";return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");}
+
+// Merge files arrays by name: keep local data (heavy bytes), fill in driveId
+// from cloud when local hasn't been uploaded yet, and append cloud-only files
+// (those exist on Drive but weren't downloaded to this device yet).
+function mergeFiles(lf,cf){
+  var L=Array.isArray(lf)?lf:[],C=Array.isArray(cf)?cf:[];
+  var byName={};C.forEach(function(f){if(f&&f.name)byName[f.name]=f;});
+  var seen={};
+  var out=L.map(function(f){if(!f||!f.name)return f;seen[f.name]=1;var c=byName[f.name];if(c&&c.driveId&&!f.driveId)return Object.assign({},f,{driveId:c.driveId});return f;});
+  C.forEach(function(f){if(f&&f.name&&!seen[f.name])out.push(f);});
+  return out;
+}
 
 // Merge cloud + local: prefer entry with newer updatedAt to avoid losing
 // recent local edits when cloud hasn't been pushed yet.
@@ -125,9 +145,9 @@ function smartMerge(cloud,local){
     var c=byId[l.id];
     if(!c){byId[l.id]=l;return;}
     var lu=l.updatedAt||0,cu=c.updatedAt||0;
-    // Pick newer; always preserve files from local (cloud doesn't store files)
     var winner=lu>cu?l:c;
-    byId[l.id]=Object.assign({},winner,{files:l.files||[]});
+    // Smart-merge files: local owns the bytes, cloud owns driveId pointers
+    byId[l.id]=Object.assign({},winner,{files:mergeFiles(l.files,c.files)});
   });
   return Object.keys(byId).map(function(k){return byId[k];});
 }
@@ -150,6 +170,8 @@ function App(){
   var[lastSync,setLastSync]=React.useState(null);
   var pushTimerRef=React.useRef(null);
   var pendingRef=React.useRef(false);
+  var uploadingRef=React.useRef({}); // map "entryId-fileName" -> true while uploading to Drive
+  var[fetchingFile,setFetchingFile]=React.useState(false);
   var[preview,setPreview]=React.useState(null);
   var[previewURL,setPreviewURL]=React.useState(null);
   var[fModal,setFModal]=React.useState(null);
@@ -199,8 +221,10 @@ function App(){
         if(!cloud||cloud.length===0)return;
         var local=loadLocal();
         var merged=smartMerge(cloud,local);
-        var aHash=JSON.stringify(merged.map(function(e){return Object.assign({},e,{files:[]});}));
-        var bHash=JSON.stringify(local.map(function(e){return Object.assign({},e,{files:[]});}));
+        // Hash only stable metadata (strip heavy data field too — it's local-only)
+        var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
+        var aHash=JSON.stringify(stripD(merged));
+        var bHash=JSON.stringify(stripD(local));
         if(aHash!==bHash){setData(merged);saveLocal(merged);setLastSync(Date.now());notify("🔄 Đã cập nhật từ thiết bị khác");}
       });
     }
@@ -218,6 +242,30 @@ function App(){
     setPreviewURL(url);
     return function(){if(url&&url.indexOf("blob:")===0){try{URL.revokeObjectURL(url);}catch(e){}}};
   },[preview]);
+
+  // Background Drive backup: any file that has bytes but no driveId gets uploaded
+  // to the Drive folder. Runs whenever data changes (e.g. after saving an entry
+  // with new attachments). Uses uploadingRef to dedupe concurrent uploads.
+  React.useEffect(function(){
+    if(!loaded||!SYNC_URL)return;
+    data.forEach(function(e){
+      (e.files||[]).forEach(function(f){
+        if(!f||!fOK(f)||f.driveId)return;
+        var key=e.id+"|"+f.name;
+        if(uploadingRef.current[key])return;
+        uploadingRef.current[key]=true;
+        driveUpload(f.name,f.type,f.data).then(function(id){
+          if(id){
+            setData(function(prev){return prev.map(function(en){
+              if(en.id!==e.id)return en;
+              return Object.assign({},en,{files:(en.files||[]).map(function(ff){return ff&&ff.name===f.name&&!ff.driveId?Object.assign({},ff,{driveId:id}):ff;}),updatedAt:Date.now()});
+            });});
+          }
+          delete uploadingRef.current[key];
+        }).catch(function(){delete uploadingRef.current[key];});
+      });
+    });
+  },[data,loaded]);
 
   function doSync(){
     setSyncing(true);
@@ -252,6 +300,31 @@ function App(){
   function addFiles(){if(fileRef.current)fileRef.current.click();}
   async function onFiles(ev){var fs=Array.from(ev.target.files||[]);if(!fs.length)return;var nf=[];for(var i=0;i<fs.length;i++){var d=await readF(fs[i]);if(fs[i].type.startsWith("image/"))d=await compress(d);nf.push({name:fs[i].name,type:fs[i].type,data:d});}setForm(function(f){return Object.assign({},f,{files:(f.files||[]).concat(nf)});});notify("📎 +"+nf.length);ev.target.value="";}
   function rmF(i){setForm(function(f){return Object.assign({},f,{files:f.files.filter(function(_,j){return j!==i;})});});}
+
+  // Open preview: if file has valid bytes locally → show directly; otherwise if it
+  // has a driveId → fetch from Drive, cache to localStorage, then show; otherwise
+  // open with no data (the modal will render the "missing" warning).
+  async function openPreview(f){
+    if(fOK(f)){setPreview(f);return;}
+    if(!f||!f.driveId){setPreview(f);return;}
+    setFetchingFile(true);
+    notify("☁ Đang tải từ Drive...");
+    var got=await driveDownload(f.driveId);
+    setFetchingFile(false);
+    if(got&&got.data){
+      var hydrated=Object.assign({},f,{data:got.data});
+      setPreview(hydrated);
+      // Cache the bytes back into localStorage so next time is instant
+      setData(function(prev){return prev.map(function(en){
+        var newFiles=(en.files||[]).map(function(ff){return ff&&ff.name===f.name&&ff.driveId===f.driveId?Object.assign({},ff,{data:got.data}):ff;});
+        var changed=(en.files||[]).some(function(ff){return ff&&ff.name===f.name&&ff.driveId===f.driveId;});
+        return changed?Object.assign({},en,{files:newFiles}):en;
+      });});
+    }else{
+      setPreview(f);
+      notify("❌ Không tải được từ Drive");
+    }
+  }
 
   // Calendar
   function calMap(){var map={};data.forEach(function(e){if(!e.date)return;var d=new Date(e.date);if(d.getFullYear()===calY&&d.getMonth()===calM){var k=d.getDate();if(!map[k])map[k]=[];map[k].push(e);}});return map;}
@@ -292,14 +365,15 @@ function App(){
 
     {preview&&<div className="ov" style={{zIndex:6000}} onClick={function(){setPreview(null);}}><div onClick={function(e){e.stopPropagation();}} style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:12,maxWidth:"100%"}}>
       <button onClick={function(){setPreview(null);}} aria-label="Đóng xem trước" style={{position:"absolute",top:-8,right:-8,width:36,height:36,borderRadius:"50%",background:"var(--c1)",border:"1px solid var(--bd)",color:"var(--t1)",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:10}}>✕</button>
-      {!preview.data?<div style={{background:"var(--c1)",borderRadius:14,padding:"32px 24px",textAlign:"center",maxWidth:400,border:"1px solid var(--bd)"}}>
-        <div style={{fontSize:48,marginBottom:12}}>⚠️</div>
-        <div style={{fontSize:16,fontWeight:800,marginBottom:8,color:"var(--amb)"}}>File không có dữ liệu</div>
-        <div style={{fontSize:13,color:"var(--t2)",lineHeight:1.5}}>"{preview.name||"không tên"}" không có dữ liệu trên thiết bị này. File chỉ lưu cục bộ trên trình duyệt của thiết bị đã upload — có thể đã bị xoá khỏi bộ nhớ.</div>
+      {!fOK(preview)?<div style={{background:"var(--c1)",borderRadius:14,padding:"32px 24px",textAlign:"center",maxWidth:400,border:"1px solid var(--bd)"}}>
+        <div style={{fontSize:48,marginBottom:12}}>{preview.driveId?"☁":"⚠️"}</div>
+        <div style={{fontSize:16,fontWeight:800,marginBottom:8,color:"var(--amb)"}}>{preview.driveId?"Không tải được từ Drive":"File không có dữ liệu"}</div>
+        <div style={{fontSize:13,color:"var(--t2)",lineHeight:1.5,marginBottom:preview.driveId?16:0}}>"{preview.name||"không tên"}" {preview.driveId?"có trên Google Drive (id: "+preview.driveId.slice(0,12)+"…) nhưng tải về thất bại. Kiểm tra mạng hoặc quyền truy cập folder.":"không có dữ liệu trên thiết bị này và chưa được sao lưu lên Drive — không thể khôi phục."}</div>
+        {preview.driveId&&<button onClick={function(){openPreview(preview);}} disabled={fetchingFile} style={{background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:12,padding:"10px 20px",fontSize:14,fontWeight:700,color:"var(--blu)",cursor:fetchingFile?"wait":"pointer",fontFamily:"inherit"}}>{fetchingFile?"⏳ Đang tải...":"🔄 Thử lại"}</button>}
       </div>:null}
-      {preview.data&&isImg(preview)&&<img src={previewURL||preview.data} alt="" style={{maxWidth:"100%",maxHeight:"72vh",borderRadius:14}}/>}
-      {preview.data&&isPdf(preview)&&previewURL&&<iframe src={previewURL} title="PDF" style={{width:"90vw",maxWidth:600,height:"70vh",border:"none",borderRadius:14,background:"#fff"}}/>}
-      {preview.data&&<div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center"}}>
+      {fOK(preview)&&isImg(preview)&&<img src={previewURL||preview.data} alt="" style={{maxWidth:"100%",maxHeight:"72vh",borderRadius:14}}/>}
+      {fOK(preview)&&isPdf(preview)&&previewURL&&<iframe src={previewURL} title="PDF" style={{width:"90vw",maxWidth:600,height:"70vh",border:"none",borderRadius:14,background:"#fff"}}/>}
+      {fOK(preview)&&<div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center"}}>
         {isPdf(preview)&&previewURL&&<button onClick={function(){window.open(previewURL,"_blank");}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 20px",fontSize:14,fontWeight:700,color:"var(--t1)",cursor:"pointer"}}>↗ Mở tab mới</button>}
         <button onClick={function(){dlFile(preview.data,preview.name);}} style={{background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,padding:"12px 24px",fontSize:15,fontWeight:700,color:"var(--blu)",cursor:"pointer"}}>⬇ Tải về</button>
       </div>}
@@ -308,10 +382,10 @@ function App(){
     {fModal&&<div className="ov" onClick={function(){setFModal(null);}}><div onClick={function(e){e.stopPropagation();}} style={{background:"var(--c1)",borderRadius:20,padding:24,maxWidth:500,width:"100%",maxHeight:"80vh",overflowY:"auto"}}>
       <div style={{fontSize:17,fontWeight:800,marginBottom:4}}>📁 File</div>
       <div style={{fontSize:13,color:"var(--t3)",marginBottom:16}}>{fd(fModal.date)}</div>
-      {(fModal.files||[]).map(function(f,i){var miss=!f.data;return <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--bd)",gap:8,opacity:miss?.7:1}}>
-        <span style={{fontSize:14,color:"var(--t2)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{isPdf(f)?"📄":"🖼"} {f.name}{miss?<span style={{marginLeft:6,background:"rgba(255,152,0,.15)",color:"var(--amb)",borderRadius:6,padding:"2px 6px",fontSize:11,fontWeight:700}}>⚠ Mất</span>:""}</span>
-        <button onClick={function(){setPreview(f);}} className="cbtn" style={{padding:"6px 12px",minHeight:36}}>Xem</button>
-        <button onClick={function(){if(miss){notify("⚠️ File không có dữ liệu");return;}dlFile(f.data,f.name);}} className="cbtn" style={{padding:"6px 12px",minHeight:36,color:miss?"var(--t3)":"var(--blu)"}}>⬇</button>
+      {(fModal.files||[]).map(function(f,i){var ok=fOK(f);var hasD=!!f.driveId;var miss=!ok&&!hasD;var cloudOnly=!ok&&hasD;var chip=miss?<span style={{marginLeft:6,background:"rgba(244,67,54,.15)",color:"var(--red)",borderRadius:6,padding:"2px 6px",fontSize:11,fontWeight:700}}>⚠ Mất</span>:cloudOnly?<span style={{marginLeft:6,background:"rgba(66,165,245,.15)",color:"var(--blu)",borderRadius:6,padding:"2px 6px",fontSize:11,fontWeight:700}}>☁ Drive</span>:<span style={{marginLeft:6,background:"rgba(76,175,80,.15)",color:"var(--grn)",borderRadius:6,padding:"2px 6px",fontSize:11,fontWeight:700}}>✓</span>;return <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--bd)",gap:8,opacity:miss?.6:1}}>
+        <span style={{fontSize:14,color:"var(--t2)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{isPdf(f)?"📄":"🖼"} {f.name}{chip}</span>
+        <button onClick={function(){openPreview(f);}} disabled={miss} className="cbtn" style={{padding:"6px 12px",minHeight:36,opacity:miss?.5:1,cursor:miss?"not-allowed":"pointer"}}>Xem</button>
+        <button onClick={function(){if(!ok){notify(hasD?"⚠️ Bấm Xem để tải từ Drive trước":"⚠️ File không có dữ liệu");return;}dlFile(f.data,f.name);}} className="cbtn" style={{padding:"6px 12px",minHeight:36,color:ok?"var(--blu)":"var(--t3)"}}>⬇</button>
       </div>;})}
       <button onClick={function(){setFModal(null);}} style={{width:"100%",marginTop:16,background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:14,padding:14,fontSize:15,fontWeight:700,color:"var(--t2)",cursor:"pointer"}}>Đóng</button>
     </div></div>}
