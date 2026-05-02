@@ -192,6 +192,25 @@ var DW=["T2","T3","T4","T5","T6","T7","CN"];
 function vnd(n){return new Intl.NumberFormat("vi-VN").format(n)+"đ";}
 function fmM(n){return n?new Intl.NumberFormat("vi-VN").format(n):"";}
 function fd(s){if(!s)return"";var d=new Date(s),w=["CN","T2","T3","T4","T5","T6","T7"];return w[d.getDay()]+", "+String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
+// Relative time for a yyyy-mm-dd date string. Returns either {solo:"..."} for single-line
+// labels (today/yesterday/tomorrow) or {big:N, small:"unit", future:bool} for two-line.
+// Approximate by design — user wants quick visual scan, not exact day count.
+function relTime(s){
+  if(!s)return null;
+  var d=new Date(s+"T00:00:00");
+  if(isNaN(d.getTime()))return null;
+  var n=new Date();
+  var today=new Date(n.getFullYear(),n.getMonth(),n.getDate());
+  var diff=Math.round((today-d)/86400000); // positive = past
+  if(diff===0)return{solo:"Hôm nay"};
+  if(diff===1)return{solo:"Hôm qua"};
+  if(diff===-1)return{solo:"Ngày mai"};
+  var future=diff<0,abs=Math.abs(diff);
+  if(abs<7)return{big:abs,small:"ngày",future:future};
+  if(abs<28){var w=Math.round(abs/7);return{big:w,small:"tuần",future:future};}
+  if(abs<365){var m=Math.round(abs/30);return{big:m,small:"tháng",future:future};}
+  return{big:Math.round(abs/365),small:"năm",future:future};
+}
 // Normalize any date string (ISO or YYYY-MM-DD) to local YYYY-MM-DD
 function nDate(s){if(!s)return"";var d=new Date(s);if(isNaN(d))return s;return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
 function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",round:"",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,note:"",files:[],updatedAt:Date.now()};}
@@ -835,10 +854,16 @@ function App(){
                 var clr=both?"var(--red)":!e.salaryPaid?"var(--blu)":"var(--amb)";
                 var vName=e.venue==="Khác"?e.customVenue:e.venue;
                 var vs=VS[e.venue]||{a:(e.customVenue||"?").substring(0,3).toUpperCase(),c:"#455A64"};
-                var fs=vs.a.length>=4?10:vs.a.length===3?12:15;
+                var rt=relTime(e.date);
                 var teams=(e.homeTeam||e.awayTeam)?(e.homeTeam||"?")+" vs "+(e.awayTeam||"?"):"";
                 return <div key={e.id} style={{position:"relative",marginBottom:18,zIndex:1}}>
-                  <div style={{position:"absolute",left:-50,top:18,width:40,height:40,borderRadius:"50%",background:vs.c,border:"3px solid "+clr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:fs,fontWeight:800,color:"#fff",letterSpacing:.3,zIndex:2,boxShadow:"0 4px 12px rgba(0,0,0,.4)"}}>{vs.a}</div>
+                  <div title={vName||""} style={{position:"absolute",left:-54,top:18,width:48,height:48,borderRadius:"50%",background:vs.c,border:"3px solid "+clr,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:"#fff",zIndex:2,boxShadow:"0 4px 12px rgba(0,0,0,.4)",lineHeight:1,padding:"0 2px",boxSizing:"border-box"}}>
+                    {rt?(rt.solo?
+                      <span style={{fontSize:rt.solo.length>7?9:10,fontWeight:700,textAlign:"center",letterSpacing:.1}}>{rt.solo}</span>:
+                      [<span key="n" style={{fontSize:18,fontWeight:800,lineHeight:1}}>{(rt.future?"+":"")+rt.big}</span>,
+                       <span key="u" style={{fontSize:9,fontWeight:600,opacity:.9,marginTop:3,letterSpacing:.2}}>{rt.small}</span>]
+                    ):<span style={{fontSize:14}}>?</span>}
+                  </div>
                   <button onClick={function(){ed(e);}} className="crd" style={{margin:0,width:"100%",textAlign:"left",cursor:"pointer",borderLeft:"4px solid "+clr,fontFamily:"inherit",color:"var(--t1)",padding:"14px 16px"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8,flexWrap:"wrap"}}>
                       <div style={{flex:"1 1 auto",minWidth:0}}>
