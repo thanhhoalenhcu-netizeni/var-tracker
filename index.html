@@ -192,16 +192,29 @@ var DW=["T2","T3","T4","T5","T6","T7","CN"];
 function vnd(n){return new Intl.NumberFormat("vi-VN").format(n)+"đ";}
 function fmM(n){return n?new Intl.NumberFormat("vi-VN").format(n):"";}
 function fd(s){if(!s)return"";var d=new Date(s),w=["CN","T2","T3","T4","T5","T6","T7"];return w[d.getDay()]+", "+String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();}
-// Relative time for a yyyy-mm-dd date string. Returns either {solo:"..."} for single-line
-// labels (today/yesterday/tomorrow) or {big:N, small:"unit", future:bool} for two-line.
-// Approximate by design — user wants quick visual scan, not exact day count.
+// Relative time for a date value (string yyyy-mm-dd, dd/mm/yyyy, Date object, or
+// timestamp). Returns either {solo:"..."} for single-line labels or
+// {big:N, small:"unit", future:bool} for two-line. Approximate by design.
 function relTime(s){
   if(!s)return null;
-  var d=new Date(s+"T00:00:00");
-  if(isNaN(d.getTime()))return null;
+  var d=null;
+  if(s instanceof Date){d=s;}
+  else if(typeof s==="number"){d=new Date(s);}
+  else if(typeof s==="string"){
+    var t=s.trim();
+    var iso=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+    if(iso){d=new Date(+iso[1],+iso[2]-1,+iso[3]);}
+    else{
+      var dmy=/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/.exec(t);
+      if(dmy){d=new Date(+dmy[3],+dmy[2]-1,+dmy[1]);} // Vietnamese DD/MM/YYYY
+      else{d=new Date(t);} // last-resort native parser
+    }
+  }
+  if(!d||isNaN(d.getTime()))return null;
+  var dDay=new Date(d.getFullYear(),d.getMonth(),d.getDate());
   var n=new Date();
   var today=new Date(n.getFullYear(),n.getMonth(),n.getDate());
-  var diff=Math.round((today-d)/86400000); // positive = past
+  var diff=Math.round((today-dDay)/86400000); // positive = past
   if(diff===0)return{solo:"Hôm nay"};
   if(diff===1)return{solo:"Hôm qua"};
   if(diff===-1)return{solo:"Ngày mai"};
