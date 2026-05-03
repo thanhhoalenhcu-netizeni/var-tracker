@@ -208,7 +208,9 @@ var DEFAULT_ROSTER=[
   "Nguyen Anh","Nguyễn Đăng Quang","Phamcongthanh","Thanh Phong","Thịnh Vtvcab Tdps",
   "Trần Minh Hoàng","Van Tu","VietLe",
   // Drivers (lái xe)
-  "A Sơn lái xe","A Dũng lái xe","A Ngọc lái xe","A Thắng lái xe"
+  "A Sơn lái xe","A Dũng lái xe","A Ngọc lái xe","A Thắng lái xe",
+  // VPF staff (cán bộ VPF ngồi trong xe)
+  "Bách VPF","Tùng VPF","Đức VPF","Thuý VPF","Linh VPF"
 ];
 // Vietnamese diacritic-insensitive normalize for fuzzy typeahead search.
 // "hư" matches "Hưng", "Hư"; "long" matches "Long Vtv8" etc. Lowercase + strip
@@ -267,7 +269,7 @@ function relTime(s){
 }
 // Normalize any date string (ISO or YYYY-MM-DD) to local YYYY-MM-DD
 function nDate(s){if(!s)return"";var d=new Date(s);if(isNaN(d))return s;return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
-function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",round:"",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,leader:"Nguyễn Đăng Quang",tech:"",ro:"",driver:"",note:"",files:[],updatedAt:Date.now()};}
+function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",round:"",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,leader:"Nguyễn Đăng Quang",tech:"",ro:"",driver:"",vpf:"",note:"",files:[],updatedAt:Date.now()};}
 function tA(e){return e.travelBase*e.travelMul+(e.travelExtra||0);}
 function compress(url,mx){mx=mx||1200;return new Promise(function(r){var i=new Image();i.onload=function(){var c=document.createElement("canvas"),s=i.width>mx?mx/i.width:1;c.width=i.width*s;c.height=i.height*s;c.getContext("2d").drawImage(i,0,0,c.width,c.height);r(c.toDataURL("image/jpeg",.7));};i.onerror=function(){r(url);};i.src=url;});}
 function readF(f){return new Promise(function(r,j){var x=new FileReader();x.onload=function(){r(x.result);};x.onerror=j;x.readAsDataURL(f);});}
@@ -840,8 +842,8 @@ function App(){
             <span>{e.homeTeam||"—"}</span><span style={{fontSize:12,color:"var(--t3)",background:"var(--c2)",borderRadius:6,padding:"2px 10px"}}>VS</span><span>{e.awayTeam||"—"}</span>
           </div>}
           {e.venue&&<div style={{fontSize:14,color:"var(--t2)",marginBottom:14}}>📍 {e.venue==="Khác"?e.customVenue||"Khác":e.venue}</div>}
-          {(e.leader||e.tech||e.ro||e.driver)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-            {[["TX",e.leader,"#42A5F5"],["KTV",e.tech,"#AB47BC"],["RO",e.ro,"#26A69A"],["LX",e.driver,"#FF7043"]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:r[2]+"22",color:r[2],border:"1px solid "+r[2]+"55",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700,display:"inline-flex",alignItems:"center",gap:6}}><span style={{fontSize:9,opacity:.7,letterSpacing:.5}}>{r[0]}</span>{r[1]}</span>;})}
+          {(e.leader||e.tech||e.ro||e.driver||e.vpf)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+            {[["TX",e.leader,"#42A5F5"],["KTV",e.tech,"#AB47BC"],["RO",e.ro,"#26A69A"],["LX",e.driver,"#FF7043"],["VPF",e.vpf,"#7E57C2"]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:r[2]+"22",color:r[2],border:"1px solid "+r[2]+"55",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700,display:"inline-flex",alignItems:"center",gap:6}}><span style={{fontSize:9,opacity:.7,letterSpacing:.5}}>{r[0]}</span>{r[1]}</span>;})}
           </div>}
           <div className="g2" style={{marginBottom:8}}>
             {[["Lương VAR",e.salary,"salaryPaid",e.salaryPaid],["CTP",tA(e),"travelPaid",e.travelPaid]].map(function(r){return <div key={r[0]} style={{background:"var(--c2)",borderRadius:14,padding:14,display:"flex",flexDirection:"column",gap:6}}>
@@ -960,6 +962,7 @@ function App(){
           <div><div className="fl">RO</div><NameInput roster={roster} value={form.ro} onChange={function(v){uf("ro",v);}} placeholder="Tên RO..."/></div>
           <div><div className="fl">Lái xe</div><NameInput roster={roster} value={form.driver} onChange={function(v){uf("driver",v);}} placeholder="Tên lái xe..."/></div>
         </div>
+        <div><div className="fl">Cán bộ VPF</div><NameInput roster={roster} value={form.vpf} onChange={function(v){uf("vpf",v);}} placeholder="Tên cán bộ VPF..."/></div>
 
         <div style={{height:1,background:"var(--bd)",margin:"20px 0"}}/>
         <div style={{fontSize:16,fontWeight:800,marginBottom:14}}>💰 Chi phí</div>
@@ -1099,8 +1102,8 @@ function App(){
                       </div>}
                     </div>
                     {teams&&<div style={{fontSize:13,color:"var(--t2)",marginBottom:10}}>⚽ {teams}</div>}
-                    {(e.leader||e.tech||e.ro||e.driver)&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10,fontSize:11,color:"var(--t3)"}}>
-                      {[["TX",e.leader],["KTV",e.tech],["RO",e.ro],["LX",e.driver]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:"var(--c2)",borderRadius:6,padding:"2px 6px",border:"1px solid var(--bd)"}}><span style={{opacity:.6,marginRight:3}}>{r[0]}</span><span style={{color:"var(--t2)",fontWeight:600}}>{r[1]}</span></span>;})}
+                    {(e.leader||e.tech||e.ro||e.driver||e.vpf)&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10,fontSize:11,color:"var(--t3)"}}>
+                      {[["TX",e.leader],["KTV",e.tech],["RO",e.ro],["LX",e.driver],["VPF",e.vpf]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:"var(--c2)",borderRadius:6,padding:"2px 6px",border:"1px solid var(--bd)"}}><span style={{opacity:.6,marginRight:3}}>{r[0]}</span><span style={{color:"var(--t2)",fontWeight:600}}>{r[1]}</span></span>;})}
                     </div>}
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                       {!e.salaryPaid&&<span style={{background:"rgba(66,165,245,.12)",color:"var(--blu)",border:"1px solid rgba(66,165,245,.3)",borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:700}}>💰 Lương: {vnd(e.salary)}</span>}
@@ -1141,23 +1144,23 @@ function App(){
           // Aggregate co-workers across visible matches by role
           var byPerson={}; // name -> {n:total, roles:{TX,KTV,RO,LX}}
           list.forEach(function(e){
-            [["TX",e.leader],["KTV",e.tech],["RO",e.ro],["LX",e.driver]].forEach(function(r){
+            [["TX",e.leader],["KTV",e.tech],["RO",e.ro],["LX",e.driver],["VPF",e.vpf]].forEach(function(r){
               var name=(r[1]||"").trim();if(!name)return;
-              if(!byPerson[name])byPerson[name]={n:0,roles:{TX:0,KTV:0,RO:0,LX:0}};
+              if(!byPerson[name])byPerson[name]={n:0,roles:{TX:0,KTV:0,RO:0,LX:0,VPF:0}};
               byPerson[name].n++;byPerson[name].roles[r[0]]++;
             });
           });
           var people=Object.keys(byPerson);
           if(people.length===0)return null;
           people.sort(function(a,b){return byPerson[b].n-byPerson[a].n;});
-          var roleColor={TX:"#42A5F5",KTV:"#AB47BC",RO:"#26A69A",LX:"#FF7043"};
+          var roleColor={TX:"#42A5F5",KTV:"#AB47BC",RO:"#26A69A",LX:"#FF7043",VPF:"#7E57C2"};
           return <div className="crd"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
               <div style={{fontSize:16,fontWeight:700}}>👥 Đồng đội ({people.length})</div>
               <div style={{fontSize:12,color:"var(--t3)"}}>Số trận đi cùng</div>
             </div>
             {people.map(function(name){var p=byPerson[name];return <div key={name} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid var(--bd)",gap:8}}>
               <div style={{flex:1,minWidth:0}}><div style={{fontSize:14,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{name}</div>
-                <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>{["TX","KTV","RO","LX"].filter(function(r){return p.roles[r]>0;}).map(function(r){return <span key={r} style={{fontSize:10,padding:"1px 6px",borderRadius:4,background:roleColor[r]+"22",color:roleColor[r],fontWeight:700}}>{r} ×{p.roles[r]}</span>;})}</div>
+                <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>{["TX","KTV","RO","LX","VPF"].filter(function(r){return p.roles[r]>0;}).map(function(r){return <span key={r} style={{fontSize:10,padding:"1px 6px",borderRadius:4,background:roleColor[r]+"22",color:roleColor[r],fontWeight:700}}>{r} ×{p.roles[r]}</span>;})}</div>
               </div>
               <div style={{fontSize:18,fontWeight:800,color:"var(--blu)",flexShrink:0}}>{p.n}</div>
             </div>;})}
