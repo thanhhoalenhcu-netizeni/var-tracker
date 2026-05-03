@@ -164,6 +164,27 @@ select{appearance:auto}textarea{resize:vertical}
 <div id="root"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<!-- Firebase SDK (modular v12 via CDN). Loaded as ES module so the imports
+     inside our inline module-script can resolve. We expose firebase APIs onto
+     window so the Babel-transpiled script (non-module) can use them. -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+  import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+  const firebaseConfig = {
+    apiKey: "AIzaSyCco1DV2puxCN4Rta0P281P_N8ppsiLyn4",
+    authDomain: "var-tracker.firebaseapp.com",
+    projectId: "var-tracker",
+    storageBucket: "var-tracker.firebasestorage.app",
+    messagingSenderId: "206619651487",
+    appId: "1:206619651487:web:0ec776bae44ec0ad4b61aa"
+  };
+  const app = initializeApp(firebaseConfig);
+  const db  = getFirestore(app);
+  // Expose for the Babel-transpiled app code below
+  window.__fb = { db, doc, setDoc, onSnapshot, serverTimestamp };
+  // Signal readiness — App will wait for this before subscribing
+  window.dispatchEvent(new Event("fb-ready"));
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
 // ============================================================
@@ -284,21 +305,35 @@ function loadRoster(){
 }
 function saveRoster(r){try{localStorage.setItem(ROSTER_STORE,JSON.stringify(r));}catch(e){}}
 
-// Google Sheets sync
-async function syncPull(){
-  if(!SYNC_URL)return null;
-  try{var r=await fetch(SYNC_URL+"?action=get");var j=await r.json();if(j.ok&&j.data)return j.data;return null;}catch(e){console.warn("Pull fail:",e);return null;}
-}
-async function syncPush(data){
-  if(!SYNC_URL)return false;
+// === Firestore realtime sync ===
+// Document path: /tracker/var (single doc, contains entire data array). Small
+// dataset (~hundreds of matches × ~1KB metadata each) so monolithic doc is
+// simpler than collection-per-entry and keeps cost low. Files stay in Drive.
+var FB_DOC_PATH=["tracker","var"]; // doc(db,"tracker","var")
+function fbReady(){return !!(window.__fb&&window.__fb.db);}
+function fbDocRef(){var f=window.__fb;return f.doc(f.db,FB_DOC_PATH[0],FB_DOC_PATH[1]);}
+
+// Push current data to Firestore. Files keep only metadata (driveId), not bytes.
+async function fbPush(data){
+  if(!fbReady())return false;
   try{
-    // Keep file metadata (name/type/driveId) but strip heavy base64 data — file
-    // bytes live in Drive, identified by driveId; metadata is small enough for Sheets.
     var clean=data.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});
-    await fetch(SYNC_URL+"?action=save",{method:"POST",body:JSON.stringify(clean),headers:{"Content-Type":"text/plain"}});
+    await window.__fb.setDoc(fbDocRef(),{entries:clean,updatedAt:window.__fb.serverTimestamp()},{merge:true});
     return true;
-  }catch(e){console.warn("Push fail:",e);return false;}
+  }catch(e){console.warn("Firestore push fail:",e);return false;}
 }
+
+// Subscribe to Firestore changes; returns unsubscribe function.
+function fbSubscribe(cb){
+  if(!fbReady())return function(){};
+  try{
+    return window.__fb.onSnapshot(fbDocRef(),function(snap){
+      if(!snap.exists())return cb([]);
+      var d=snap.data();cb(Array.isArray(d.entries)?d.entries:[]);
+    },function(err){console.warn("Firestore subscribe error:",err);});
+  }catch(e){console.warn("Firestore subscribe fail:",e);return function(){};}
+}
+
 function fmtTime(t){if(!t)return"";var d=new Date(t),now=new Date(),diff=(now-d)/1000;if(diff<60)return"vừa xong";if(diff<3600)return Math.floor(diff/60)+"p trước";if(diff<86400)return Math.floor(diff/3600)+"h trước";return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");}
 
 // Merge files arrays by name: keep local data (heavy bytes), fill in driveId
@@ -482,56 +517,74 @@ function App(){
   var aiRef=React.useRef(null);
   var fileRef=React.useRef(null);
 
-  // Load: local first, then pull from cloud
+  // === Firestore realtime sync ===
+  // Pattern: subscribe once to the doc; every write from any device flows back
+  // through onSnapshot. Local writes are written-then-listened (we get our own
+  // changes back ~instantly, which is fine — setData with same content is no-op).
+  // applyingRemoteRef guards against the push effect refiring on data we just
+  // received from the listener (would create an infinite write loop).
+  var applyingRemoteRef=React.useRef(false);
+  var fbReadyState=React.useState(fbReady());
+  var fbIsReady=fbReadyState[0],setFbIsReady=fbReadyState[1];
+
+  // Wait for Firebase SDK module to initialize (it loads async)
+  React.useEffect(function(){
+    if(fbIsReady)return;
+    function onReady(){setFbIsReady(true);}
+    window.addEventListener("fb-ready",onReady);
+    // Fallback: poll for 5 seconds in case event missed
+    var tries=0,iv=setInterval(function(){if(fbReady()){setFbIsReady(true);clearInterval(iv);}else if(++tries>50)clearInterval(iv);},100);
+    return function(){window.removeEventListener("fb-ready",onReady);clearInterval(iv);};
+  },[fbIsReady]);
+
+  // Initial load: localStorage first (instant render), then subscribe to Firestore
   React.useEffect(function(){
     var local=loadLocal();
     setData(local);
     setLoaded(true);
-    syncPull().then(function(cloud){
-      if(cloud&&cloud.length>0){
-        var merged=smartMerge(cloud,local);
-        setData(merged);
-        saveLocal(merged);
-        setLastSync(Date.now());
-      }
-    });
   },[]);
 
-  // Save on change: local instant, cloud debounced (1.5s) to avoid lag
+  // Subscribe to Firestore once SDK is ready and we've loaded local data.
+  // Realtime: any change on any device delivers here within ~300ms.
   React.useEffect(function(){
-    if(!loaded)return;
+    if(!loaded||!fbIsReady)return;
+    var unsub=fbSubscribe(function(cloud){
+      var local=loadLocal();
+      // First-ever subscribe: cloud may be empty → push our local up if we have any
+      if((!cloud||cloud.length===0)&&local.length>0){fbPush(local);return;}
+      var merged=smartMerge(cloud||[],local);
+      // Avoid no-op rerenders + don't trigger our own push effect
+      var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
+      var hLocal=JSON.stringify(stripD(local));
+      var hMerged=JSON.stringify(stripD(merged));
+      if(hLocal!==hMerged){
+        applyingRemoteRef.current=true;
+        setData(merged);
+        saveLocal(merged);
+        notify("🔄 Đã cập nhật");
+      }
+      setLastSync(Date.now());
+    });
+    return unsub;
+  },[loaded,fbIsReady]);
+
+  // Push local changes up to Firestore — debounced 500ms (was 1.5s for Sheets;
+  // Firestore is much faster so we can be more aggressive). Skip if the data
+  // change was caused by a remote update we just applied.
+  React.useEffect(function(){
+    if(!loaded||!fbIsReady)return;
     saveLocal(data);
-    if(!SYNC_URL)return;
+    if(applyingRemoteRef.current){applyingRemoteRef.current=false;return;}
     pendingRef.current=true;
     if(pushTimerRef.current)clearTimeout(pushTimerRef.current);
     pushTimerRef.current=setTimeout(function(){
       setSyncing(true);
-      syncPush(data).then(function(ok){
+      fbPush(data).then(function(ok){
         setSyncing(false);
         if(ok){pendingRef.current=false;setLastSync(Date.now());}
       });
-    },1500);
-  },[data,loaded]);
-
-  // Pull on visibility change (when user switches back to app)
-  React.useEffect(function(){
-    function onVis(){
-      if(document.visibilityState!=="visible"||!loaded||pendingRef.current)return;
-      syncPull().then(function(cloud){
-        if(!cloud||cloud.length===0)return;
-        var local=loadLocal();
-        var merged=smartMerge(cloud,local);
-        // Hash only stable metadata (strip heavy data field too — it's local-only)
-        var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
-        var aHash=JSON.stringify(stripD(merged));
-        var bHash=JSON.stringify(stripD(local));
-        if(aHash!==bHash){setData(merged);saveLocal(merged);setLastSync(Date.now());notify("🔄 Đã cập nhật từ thiết bị khác");}
-      });
-    }
-    document.addEventListener("visibilitychange",onVis);
-    window.addEventListener("focus",onVis);
-    return function(){document.removeEventListener("visibilitychange",onVis);window.removeEventListener("focus",onVis);};
-  },[loaded]);
+    },500);
+  },[data,loaded,fbIsReady]);
 
   // Manage Blob URL for the file preview. data: URIs are blocked inside <iframe>
   // by Chrome/Safari (which is why PDF preview was showing as a blank page);
@@ -576,15 +629,14 @@ function App(){
   },[lastSync]);
 
   function doSync(){
+    // Firestore subscription already keeps us live. This button just gives
+    // the user a manual nudge + visual feedback that the connection is alive.
     setSyncing(true);
-    syncPull().then(function(cloud){
-      if(cloud){
-        var local=loadLocal();
-        var merged=smartMerge(cloud,local);
-        setData(merged);saveLocal(merged);
-      }
-      setSyncing(false);setLastSync(Date.now());notify("🔄 Đã đồng bộ");
-    }).catch(function(){setSyncing(false);});
+    fbPush(data).then(function(ok){
+      setSyncing(false);
+      if(ok){setLastSync(Date.now());notify("🔄 Đã đồng bộ");}
+      else notify("⚠️ Lỗi đồng bộ");
+    });
   }
 
   function notify(m){setToast(m);setTimeout(function(){setToast(null);},2500);}
