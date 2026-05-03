@@ -842,8 +842,12 @@ function App(){
             <span>{e.homeTeam||"—"}</span><span style={{fontSize:12,color:"var(--t3)",background:"var(--c2)",borderRadius:6,padding:"2px 10px"}}>VS</span><span>{e.awayTeam||"—"}</span>
           </div>}
           {e.venue&&<div style={{fontSize:14,color:"var(--t2)",marginBottom:14}}>📍 {e.venue==="Khác"?e.customVenue||"Khác":e.venue}</div>}
-          {(e.leader||e.tech||e.ro||e.driver||e.vpf)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-            {[["TX",e.leader,"#42A5F5"],["KTV",e.tech,"#AB47BC"],["RO",e.ro,"#26A69A"],["LX",e.driver,"#FF7043"],["VPF",e.vpf,"#7E57C2"]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:r[2]+"22",color:r[2],border:"1px solid "+r[2]+"55",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700,display:"inline-flex",alignItems:"center",gap:6}}><span style={{fontSize:9,opacity:.7,letterSpacing:.5}}>{r[0]}</span>{r[1]}</span>;})}
+          {(e.leader||e.tech||e.ro||e.driver)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+            {[["TX",e.leader,"#42A5F5"],["KTV",e.tech,"#AB47BC"],["RO",e.ro,"#26A69A"],["LX",e.driver,"#FF7043"]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:r[2]+"22",color:r[2],border:"1px solid "+r[2]+"55",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700,display:"inline-flex",alignItems:"center",gap:6}}><span style={{fontSize:9,opacity:.7,letterSpacing:.5}}>{r[0]}</span>{r[1]}</span>;})}
+          </div>}
+          {e.vpf&&<div style={{display:"inline-flex",alignItems:"center",gap:8,marginBottom:14,padding:"6px 12px",background:"rgba(126,87,194,.1)",border:"1px dashed rgba(126,87,194,.5)",borderRadius:10}}>
+            <span style={{fontSize:10,fontWeight:800,color:"#7E57C2",letterSpacing:.5,textTransform:"uppercase"}}>🎫 Khách VPF</span>
+            <span style={{color:"var(--t1)",fontWeight:700,fontSize:13}}>{e.vpf}</span>
           </div>}
           <div className="g2" style={{marginBottom:8}}>
             {[["Lương VAR",e.salary,"salaryPaid",e.salaryPaid],["CTP",tA(e),"travelPaid",e.travelPaid]].map(function(r){return <div key={r[0]} style={{background:"var(--c2)",borderRadius:14,padding:14,display:"flex",flexDirection:"column",gap:6}}>
@@ -1102,8 +1106,12 @@ function App(){
                       </div>}
                     </div>
                     {teams&&<div style={{fontSize:13,color:"var(--t2)",marginBottom:10}}>⚽ {teams}</div>}
-                    {(e.leader||e.tech||e.ro||e.driver||e.vpf)&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10,fontSize:11,color:"var(--t3)"}}>
-                      {[["TX",e.leader],["KTV",e.tech],["RO",e.ro],["LX",e.driver],["VPF",e.vpf]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:"var(--c2)",borderRadius:6,padding:"2px 6px",border:"1px solid var(--bd)"}}><span style={{opacity:.6,marginRight:3}}>{r[0]}</span><span style={{color:"var(--t2)",fontWeight:600}}>{r[1]}</span></span>;})}
+                    {(e.leader||e.tech||e.ro||e.driver)&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6,fontSize:11,color:"var(--t3)"}}>
+                      {[["TX",e.leader],["KTV",e.tech],["RO",e.ro],["LX",e.driver]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:"var(--c2)",borderRadius:6,padding:"2px 6px",border:"1px solid var(--bd)"}}><span style={{opacity:.6,marginRight:3}}>{r[0]}</span><span style={{color:"var(--t2)",fontWeight:600}}>{r[1]}</span></span>;})}
+                    </div>}
+                    {e.vpf&&<div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10,marginTop:e.leader||e.tech||e.ro||e.driver?0:0,paddingTop:6,paddingBottom:6,paddingLeft:8,paddingRight:8,background:"rgba(126,87,194,.08)",border:"1px dashed rgba(126,87,194,.4)",borderRadius:8,fontSize:11,width:"fit-content"}}>
+                      <span style={{fontSize:10,fontWeight:800,color:"#7E57C2",letterSpacing:.4,textTransform:"uppercase"}}>🎫 Khách VPF</span>
+                      <span style={{color:"var(--t1)",fontWeight:700,fontSize:12}}>{e.vpf}</span>
                     </div>}
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                       {!e.salaryPaid&&<span style={{background:"rgba(66,165,245,.12)",color:"var(--blu)",border:"1px solid rgba(66,165,245,.3)",borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:700}}>💰 Lương: {vnd(e.salary)}</span>}
