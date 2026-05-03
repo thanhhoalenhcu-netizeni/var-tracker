@@ -173,6 +173,26 @@ var SYNC_URL = "https://script.google.com/macros/s/AKfycbwSE772NYibPpjceErmLdBHX
 // ============================================================
 
 var STORE="var-tracker-v5";
+var ROSTER_STORE="var-tracker-roster-v1";
+// Default roster — extracted from your Zalo group (32 thành viên gồm cả bạn).
+// You can add/remove names live in the app via the ⚙️ button next to the team
+// fields; this list only seeds the first-run experience.
+var DEFAULT_ROSTER=[
+  "A Giap Tekcast","Cường Xuân Trần","A An Tp Kt Vtv8","A Dương Bảo Bệ Tekcast",
+  "A Hưng - Vtv - Xe THLD","A Hưng Vũ Quang","A Quế Ban Biên Tập Cáp","A Sơn Vtv Var",
+  "Bảo Duy","Bảy Hoàng","Bạo Võ Xuân","Chau Ban bien tap cap",
+  "Cuongpm (a Cường toác vtv)","Duy Long","Hải Huỳnh","Hieu Vtvcab",
+  "Hoàng Thiều Huy","Huygia","Hưng Nguyễn Đăng","Khánh Vtv Đà Nẵng - Lắp Đặt",
+  "Long Nguyễn Bảo","Long Vtv8","Nam Hoai Tekcast","Ngoc Khac",
+  "Nguyen Anh","Nguyễn Đăng Quang","Phamcongthanh","Thanh Phong","Thịnh Vtvcab Tdps",
+  "Trần Minh Hoàng","Van Tu","VietLe",
+  // Drivers (lái xe)
+  "A Sơn lái xe","A Dũng lái xe","A Ngọc lái xe","A Thắng lái xe"
+];
+// Vietnamese diacritic-insensitive normalize for fuzzy typeahead search.
+// "hư" matches "Hưng", "Hư"; "long" matches "Long Vtv8" etc. Lowercase + strip
+// combining marks + đ→d so users don't have to type tone marks.
+function normVN(s){return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d");}
 var VN={"Hàng Đẫy":{x:1},"Mỹ Đình":{x:1},"Hải Phòng":{x:1},"Thanh Hoá":{x:1},"Ninh Bình":{x:1},"Nam Định":{x:1},"VPF Hưng Yên":{x:1},"Vinh":{x:1.5},"Hà Tĩnh":{x:2},"Khác":{x:1}};
 // Stadium identity: abbreviation + color for timeline markers
 var VS={"Hàng Đẫy":{a:"HĐ",c:"#7B1FA2"},"Mỹ Đình":{a:"MĐ",c:"#C62828"},"Hải Phòng":{a:"HP",c:"#BF360C"},"Thanh Hoá":{a:"TH",c:"#E65100"},"Ninh Bình":{a:"NB",c:"#2E7D32"},"Nam Định":{a:"NĐ",c:"#558B2F"},"VPF Hưng Yên":{a:"VPF",c:"#01579B"},"Vinh":{a:"VINH",c:"#4E342E"},"Hà Tĩnh":{a:"HT",c:"#880E4F"},"Khác":{a:"?",c:"#455A64"}};
@@ -226,7 +246,7 @@ function relTime(s){
 }
 // Normalize any date string (ISO or YYYY-MM-DD) to local YYYY-MM-DD
 function nDate(s){if(!s)return"";var d=new Date(s);if(isNaN(d))return s;return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
-function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",round:"",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,note:"",files:[],updatedAt:Date.now()};}
+function mk(){return{id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),date:"",time:"",venue:"",customVenue:"",homeTeam:"",awayTeam:"",competition:"V.League 1",round:"",salary:2500000,travelMul:1,travelBase:300000,travelExtra:0,travelNote:"",salaryPaid:false,travelPaid:false,leader:"Nguyễn Đăng Quang",tech:"",ro:"",driver:"",note:"",files:[],updatedAt:Date.now()};}
 function tA(e){return e.travelBase*e.travelMul+(e.travelExtra||0);}
 function compress(url,mx){mx=mx||1200;return new Promise(function(r){var i=new Image();i.onload=function(){var c=document.createElement("canvas"),s=i.width>mx?mx/i.width:1;c.width=i.width*s;c.height=i.height*s;c.getContext("2d").drawImage(i,0,0,c.width,c.height);r(c.toDataURL("image/jpeg",.7));};i.onerror=function(){r(url);};i.src=url;});}
 function readF(f){return new Promise(function(r,j){var x=new FileReader();x.onload=function(){r(x.result);};x.onerror=j;x.readAsDataURL(f);});}
@@ -245,6 +265,24 @@ async function driveDownload(id){if(!SYNC_URL||!id)return null;try{var r=await f
 // Local storage
 function loadLocal(){try{var d=localStorage.getItem(STORE);return d?JSON.parse(d):[];}catch(e){return[];}}
 function saveLocal(data){try{localStorage.setItem(STORE,JSON.stringify(data));}catch(e){}}
+// Roster (team-member name list) persistence — small enough to live entirely in
+// localStorage; sync to Sheets is optional and handled lazily next save.
+function loadRoster(){
+  try{
+    var d=localStorage.getItem(ROSTER_STORE);
+    if(!d)return DEFAULT_ROSTER.slice();
+    var stored=JSON.parse(d);
+    if(!Array.isArray(stored))return DEFAULT_ROSTER.slice();
+    // Migration: merge in any new names from DEFAULT_ROSTER that aren't already
+    // present (compared diacritic-insensitively). Lets us ship roster updates
+    // without users losing their custom additions or seeing duplicates.
+    var have={};stored.forEach(function(n){have[normVN(n)]=true;});
+    var merged=stored.slice();
+    DEFAULT_ROSTER.forEach(function(n){if(!have[normVN(n)])merged.push(n);});
+    return merged;
+  }catch(e){return DEFAULT_ROSTER.slice();}
+}
+function saveRoster(r){try{localStorage.setItem(ROSTER_STORE,JSON.stringify(r));}catch(e){}}
 
 // Google Sheets sync
 async function syncPull(){
@@ -307,6 +345,103 @@ function Ball(p){
   </svg>;
 }
 
+// Typeahead input for picking a team-member name from a roster, with diacritic-
+// insensitive search. Supports keyboard navigation (↑↓ Enter Esc) and free-text
+// (you can type a name not in the roster — typed value is kept verbatim).
+function NameInput(p){
+  var roster=p.roster||[],value=p.value||"",onChange=p.onChange||function(){};
+  var[open,setOpen]=React.useState(false);
+  var[hi,setHi]=React.useState(0); // highlighted suggestion index
+  var ref=React.useRef(null);
+  var n=normVN(value);
+  // Suggest if typed at least 1 char; rank prefix matches first, then substring.
+  var suggestions=React.useMemo(function(){
+    if(!n)return [];
+    var pref=[],sub=[];
+    roster.forEach(function(name){
+      var nn=normVN(name);
+      if(nn===n)return; // skip exact match (already typed)
+      if(nn.indexOf(n)===0)pref.push(name);
+      else if(nn.indexOf(" "+n)>-1||nn.indexOf(n)>-1)sub.push(name);
+    });
+    return pref.concat(sub).slice(0,8);
+  },[n,roster]);
+  React.useEffect(function(){setHi(0);},[n]);
+  React.useEffect(function(){
+    function onDoc(ev){if(ref.current&&!ref.current.contains(ev.target))setOpen(false);}
+    document.addEventListener("mousedown",onDoc);
+    return function(){document.removeEventListener("mousedown",onDoc);};
+  },[]);
+  function pick(name){onChange(name);setOpen(false);}
+  function onKey(ev){
+    if(!open||suggestions.length===0)return;
+    if(ev.key==="ArrowDown"){ev.preventDefault();setHi(function(h){return (h+1)%suggestions.length;});}
+    else if(ev.key==="ArrowUp"){ev.preventDefault();setHi(function(h){return (h-1+suggestions.length)%suggestions.length;});}
+    else if(ev.key==="Enter"){ev.preventDefault();pick(suggestions[hi]);}
+    else if(ev.key==="Escape"){setOpen(false);}
+  }
+  return <div ref={ref} style={{position:"relative"}}>
+    <input type="text" className="fi" value={value}
+      onChange={function(e){onChange(e.target.value);setOpen(true);}}
+      onFocus={function(){setOpen(true);}}
+      onKeyDown={onKey}
+      placeholder={p.placeholder||""}
+      autoComplete="off"
+    />
+    {open&&suggestions.length>0&&<div style={{position:"absolute",top:"100%",left:0,right:0,marginTop:4,background:"var(--c1)",border:"1px solid var(--bd)",borderRadius:12,boxShadow:"0 8px 24px rgba(0,0,0,.4)",zIndex:50,maxHeight:240,overflowY:"auto"}}>
+      {suggestions.map(function(name,i){return <button key={name} type="button" onMouseDown={function(ev){ev.preventDefault();pick(name);}} onMouseEnter={function(){setHi(i);}}
+        style={{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",background:i===hi?"var(--c2)":"transparent",border:"none",color:"var(--t1)",fontSize:14,cursor:"pointer",fontFamily:"inherit",borderBottom:i<suggestions.length-1?"1px solid var(--bd)":"none"}}>
+        {name}
+      </button>;})}
+    </div>}
+  </div>;
+}
+
+// Modal for adding/removing/editing team-member names. Sorts alphabetically
+// (Vietnamese-aware) and supports inline rename. Names are persisted by App.
+function RosterModal(p){
+  var[input,setInput]=React.useState("");
+  var[editIdx,setEditIdx]=React.useState(-1);
+  var[editVal,setEditVal]=React.useState("");
+  function add(){
+    var v=input.trim();if(!v)return;
+    if(p.roster.some(function(x){return normVN(x)===normVN(v);})){setInput("");return;}
+    p.setRoster(p.roster.concat([v]).sort(function(a,b){return a.localeCompare(b,"vi");}));
+    setInput("");
+  }
+  function rm(i){p.setRoster(p.roster.filter(function(_,j){return j!==i;}));}
+  function commitEdit(i){
+    var v=editVal.trim();if(!v){setEditIdx(-1);return;}
+    p.setRoster(p.roster.map(function(x,j){return j===i?v:x;}).sort(function(a,b){return a.localeCompare(b,"vi");}));
+    setEditIdx(-1);setEditVal("");
+  }
+  return <div className="ov" onClick={p.onClose}>
+    <div onClick={function(e){e.stopPropagation();}} style={{background:"var(--c1)",borderRadius:20,padding:24,maxWidth:500,width:"100%",maxHeight:"80vh",display:"flex",flexDirection:"column"}}>
+      <div style={{fontSize:17,fontWeight:800,marginBottom:4}}>👥 Danh sách nhân sự</div>
+      <div style={{fontSize:13,color:"var(--t3)",marginBottom:14}}>{p.roster.length} người · gõ tên để autocomplete khi thêm trận</div>
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        <input type="text" value={input} onChange={function(e){setInput(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")add();}} placeholder="Tên người mới..." className="fi" style={{flex:1}}/>
+        <button onClick={add} disabled={!input.trim()} className="btn-s" style={{minWidth:80,opacity:input.trim()?1:.5}}>＋ Thêm</button>
+      </div>
+      <div style={{flex:1,overflowY:"auto",border:"1px solid var(--bd)",borderRadius:12,background:"var(--c2)"}}>
+        {p.roster.length===0?<div style={{padding:24,textAlign:"center",color:"var(--t3)",fontSize:13}}>Chưa có ai. Thêm người ở trên.</div>:
+        p.roster.map(function(name,i){return <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderBottom:i<p.roster.length-1?"1px solid var(--bd)":"none"}}>
+          {editIdx===i?
+            <><input type="text" value={editVal} onChange={function(e){setEditVal(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")commitEdit(i);if(e.key==="Escape")setEditIdx(-1);}} className="fi" style={{flex:1,padding:"6px 10px",fontSize:14}} autoFocus/>
+            <button onClick={function(){commitEdit(i);}} className="cbtn" style={{padding:"4px 10px",color:"var(--grn)"}}>✓</button>
+            <button onClick={function(){setEditIdx(-1);}} className="cbtn" style={{padding:"4px 10px"}}>✕</button></>
+          :
+            <><span style={{flex:1,fontSize:14,color:"var(--t1)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</span>
+            <button onClick={function(){setEditIdx(i);setEditVal(name);}} className="cbtn" style={{padding:"4px 10px",color:"var(--blu)"}} aria-label="Sửa">✎</button>
+            <button onClick={function(){rm(i);}} className="cbtn" style={{padding:"4px 10px",color:"var(--red)"}} aria-label="Xoá">🗑</button></>
+          }
+        </div>;})}
+      </div>
+      <button onClick={p.onClose} style={{width:"100%",marginTop:14,background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:14,padding:14,fontSize:15,fontWeight:700,color:"var(--t2)",cursor:"pointer",fontFamily:"inherit"}}>Đóng</button>
+    </div>
+  </div>;
+}
+
 function App(){
   var[data,setData]=React.useState([]);
   var[tab,setTab]=React.useState("timeline");
@@ -332,6 +467,9 @@ function App(){
   var[markAllAnim,setMarkAllAnim]=React.useState(null); // "salary"|"travel" while ball-anim runs
   var[syncPulse,setSyncPulse]=React.useState(false);
   var[ballKick,setBallKick]=React.useState(false); // header ball easter-egg burst
+  var[roster,setRoster]=React.useState(loadRoster);
+  var[rosterModal,setRosterModal]=React.useState(false);
+  React.useEffect(function(){saveRoster(roster);},[roster]);
   var[undoData,setUndoData]=React.useState(null); // {id, field, wasPaid} for undo snackbar
   var undoTimerRef=React.useRef(null);
   var[preview,setPreview]=React.useState(null);
@@ -588,6 +726,9 @@ function App(){
       <button onClick={function(){setFModal(null);}} style={{width:"100%",marginTop:16,background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:14,padding:14,fontSize:15,fontWeight:700,color:"var(--t2)",cursor:"pointer"}}>Đóng</button>
     </div></div>}
 
+    {/* Roster management modal — add/remove team-member names */}
+    {rosterModal&&<RosterModal roster={roster} setRoster={setRoster} onClose={function(){setRosterModal(false);}}/>}
+
     <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple onChange={onFiles} style={{display:"none"}}/>
 
     {/* Header */}
@@ -647,6 +788,9 @@ function App(){
             <span>{e.homeTeam||"—"}</span><span style={{fontSize:12,color:"var(--t3)",background:"var(--c2)",borderRadius:6,padding:"2px 10px"}}>VS</span><span>{e.awayTeam||"—"}</span>
           </div>}
           {e.venue&&<div style={{fontSize:14,color:"var(--t2)",marginBottom:14}}>📍 {e.venue==="Khác"?e.customVenue||"Khác":e.venue}</div>}
+          {(e.leader||e.tech||e.ro||e.driver)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+            {[["TX",e.leader,"#42A5F5"],["KTV",e.tech,"#AB47BC"],["RO",e.ro,"#26A69A"],["LX",e.driver,"#FF7043"]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:r[2]+"22",color:r[2],border:"1px solid "+r[2]+"55",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700,display:"inline-flex",alignItems:"center",gap:6}}><span style={{fontSize:9,opacity:.7,letterSpacing:.5}}>{r[0]}</span>{r[1]}</span>;})}
+          </div>}
           <div className="g2" style={{marginBottom:8}}>
             {[["Lương VAR",e.salary,"salaryPaid",e.salaryPaid],["CTP",tA(e),"travelPaid",e.travelPaid]].map(function(r){return <div key={r[0]} style={{background:"var(--c2)",borderRadius:14,padding:14,display:"flex",flexDirection:"column",gap:6}}>
               <div style={{fontSize:10,color:"var(--t3)",fontWeight:700,letterSpacing:.8,textTransform:"uppercase"}}>{r[0]}</div>
@@ -750,6 +894,20 @@ function App(){
           {form.venue&&form.venue!=="Khác"&&VN[form.venue]&&<div style={{fontSize:13,color:"var(--grn)",marginTop:8,padding:"6px 12px",background:"rgba(76,175,80,.1)",borderRadius:10}}>Hệ số ×{form.travelMul}</div>}
         </div>
         <div className="g2"><div><div className="fl">Đội nhà</div><input type="text" value={form.homeTeam} onChange={function(e){uf("homeTeam",e.target.value);}} className="fi" placeholder="SHB Đà Nẵng"/></div><div><div className="fl">Đội khách</div><input type="text" value={form.awayTeam} onChange={function(e){uf("awayTeam",e.target.value);}} className="fi" placeholder="CAHN"/></div></div>
+
+        <div style={{height:1,background:"var(--bd)",margin:"20px 0"}}/>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+          <div style={{fontSize:16,fontWeight:800}}>👥 Đội đi triển khai <span style={{fontSize:11,fontWeight:600,color:"var(--t3)",letterSpacing:.3,marginLeft:6}}>(không bắt buộc)</span></div>
+          <button type="button" onClick={function(){setRosterModal(true);}} aria-label="Quản lý danh sách nhân sự" style={{background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:10,padding:"6px 12px",fontSize:12,color:"var(--blu)",cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>⚙️ Danh sách ({roster.length})</button>
+        </div>
+        <div className="g2">
+          <div><div className="fl">Trưởng xe</div><NameInput roster={roster} value={form.leader} onChange={function(v){uf("leader",v);}} placeholder="Tên trưởng xe..."/></div>
+          <div><div className="fl">Kỹ thuật viên</div><NameInput roster={roster} value={form.tech} onChange={function(v){uf("tech",v);}} placeholder="Tên KTV..."/></div>
+        </div>
+        <div className="g2">
+          <div><div className="fl">RO</div><NameInput roster={roster} value={form.ro} onChange={function(v){uf("ro",v);}} placeholder="Tên RO..."/></div>
+          <div><div className="fl">Lái xe</div><NameInput roster={roster} value={form.driver} onChange={function(v){uf("driver",v);}} placeholder="Tên lái xe..."/></div>
+        </div>
 
         <div style={{height:1,background:"var(--bd)",margin:"20px 0"}}/>
         <div style={{fontSize:16,fontWeight:800,marginBottom:14}}>💰 Chi phí</div>
@@ -889,6 +1047,9 @@ function App(){
                       </div>}
                     </div>
                     {teams&&<div style={{fontSize:13,color:"var(--t2)",marginBottom:10}}>⚽ {teams}</div>}
+                    {(e.leader||e.tech||e.ro||e.driver)&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10,fontSize:11,color:"var(--t3)"}}>
+                      {[["TX",e.leader],["KTV",e.tech],["RO",e.ro],["LX",e.driver]].filter(function(r){return r[1];}).map(function(r,i){return <span key={i} style={{background:"var(--c2)",borderRadius:6,padding:"2px 6px",border:"1px solid var(--bd)"}}><span style={{opacity:.6,marginRight:3}}>{r[0]}</span><span style={{color:"var(--t2)",fontWeight:600}}>{r[1]}</span></span>;})}
+                    </div>}
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                       {!e.salaryPaid&&<span style={{background:"rgba(66,165,245,.12)",color:"var(--blu)",border:"1px solid rgba(66,165,245,.3)",borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:700}}>💰 Lương: {vnd(e.salary)}</span>}
                       {!e.travelPaid&&<span style={{background:"rgba(255,152,0,.12)",color:"var(--amb)",border:"1px solid rgba(255,152,0,.3)",borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:700}}>🚗 CTP: {vnd(tA(e))}</span>}
@@ -921,6 +1082,32 @@ function App(){
               <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                 {Object.keys(g.rounds).sort(function(a,b){var na=parseInt((a.match(/\d+/)||[0])[0]),nb=parseInt((b.match(/\d+/)||[0])[0]);return na-nb;}).map(function(r){return <span key={r} style={{background:"var(--c2)",border:"1px solid var(--bd)",borderRadius:8,padding:"4px 10px",fontSize:12,color:"var(--t2)"}}>{r} <span style={{color:"var(--blu)",fontWeight:800}}>×{g.rounds[r]}</span></span>;})}
               </div>
+            </div>;})}
+          </div>;
+        })()}
+        {list.length>0&&(function(){
+          // Aggregate co-workers across visible matches by role
+          var byPerson={}; // name -> {n:total, roles:{TX,KTV,RO,LX}}
+          list.forEach(function(e){
+            [["TX",e.leader],["KTV",e.tech],["RO",e.ro],["LX",e.driver]].forEach(function(r){
+              var name=(r[1]||"").trim();if(!name)return;
+              if(!byPerson[name])byPerson[name]={n:0,roles:{TX:0,KTV:0,RO:0,LX:0}};
+              byPerson[name].n++;byPerson[name].roles[r[0]]++;
+            });
+          });
+          var people=Object.keys(byPerson);
+          if(people.length===0)return null;
+          people.sort(function(a,b){return byPerson[b].n-byPerson[a].n;});
+          var roleColor={TX:"#42A5F5",KTV:"#AB47BC",RO:"#26A69A",LX:"#FF7043"};
+          return <div className="crd"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontSize:16,fontWeight:700}}>👥 Đồng đội ({people.length})</div>
+              <div style={{fontSize:12,color:"var(--t3)"}}>Số trận đi cùng</div>
+            </div>
+            {people.map(function(name){var p=byPerson[name];return <div key={name} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid var(--bd)",gap:8}}>
+              <div style={{flex:1,minWidth:0}}><div style={{fontSize:14,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{name}</div>
+                <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>{["TX","KTV","RO","LX"].filter(function(r){return p.roles[r]>0;}).map(function(r){return <span key={r} style={{fontSize:10,padding:"1px 6px",borderRadius:4,background:roleColor[r]+"22",color:roleColor[r],fontWeight:700}}>{r} ×{p.roles[r]}</span>;})}</div>
+              </div>
+              <div style={{fontSize:18,fontWeight:800,color:"var(--blu)",flexShrink:0}}>{p.n}</div>
             </div>;})}
           </div>;
         })()}
