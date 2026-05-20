@@ -169,7 +169,7 @@ select{appearance:auto}textarea{resize:vertical}
      window so the Babel-transpiled script (non-module) can use them. -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-  import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+  import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
   const firebaseConfig = {
     apiKey: "AIzaSyCco1DV2puxCN4Rta0P281P_N8ppsiLyn4",
     authDomain: "var-tracker.firebaseapp.com",
@@ -180,6 +180,10 @@ select{appearance:auto}textarea{resize:vertical}
   };
   const app = initializeApp(firebaseConfig);
   const db  = getFirestore(app);
+  enableIndexedDbPersistence(db).catch(function(e){
+    if(e.code==="failed-precondition")console.warn("Firestore persistence: nhiều tab mở");
+    else if(e.code!=="unimplemented")console.warn("Firestore persistence:",e);
+  });
   // Expose for the Babel-transpiled app code below
   window.__fb = { db, doc, setDoc, onSnapshot, serverTimestamp };
   // Signal readiness — App will wait for this before subscribing
@@ -526,8 +530,31 @@ function App(){
   // applyingRemoteRef guards against the push effect refiring on data we just
   // received from the listener (would create an infinite write loop).
   var applyingRemoteRef=React.useRef(false);
+  var dataRef=React.useRef([]);
+  var flushInProgressRef=React.useRef(false);
   var fbReadyState=React.useState(fbReady());
   var fbIsReady=fbReadyState[0],setFbIsReady=fbReadyState[1];
+
+  React.useEffect(function(){dataRef.current=data;},[data]);
+
+  function pushNow(opts){
+    opts=opts||{};
+    if(!loaded||!fbIsReady)return Promise.resolve(false);
+    if(applyingRemoteRef.current&&!opts.force)return Promise.resolve(false);
+    var snapshot=opts.data!=null?opts.data:dataRef.current;
+    saveLocal(snapshot);
+    if(pushTimerRef.current){clearTimeout(pushTimerRef.current);pushTimerRef.current=null;}
+    if(flushInProgressRef.current&&!opts.force)return Promise.resolve(false);
+    flushInProgressRef.current=true;
+    setSyncing(true);
+    return fbPush(snapshot).then(function(ok){
+      setSyncing(false);
+      flushInProgressRef.current=false;
+      if(ok){pendingRef.current=false;setLastSync(Date.now());}
+      else if(opts.toastOnFail)notify("⚠️ Lỗi đồng bộ — thử lại");
+      return ok;
+    });
+  }
 
   // Wait for Firebase SDK module to initialize (it loads async)
   React.useEffect(function(){
@@ -570,8 +597,7 @@ function App(){
     return unsub;
   },[loaded,fbIsReady]);
 
-  // Push local changes up to Firestore — debounced 500ms (was 1.5s for Sheets;
-  // Firestore is much faster so we can be more aggressive). Skip if the data
+  // Push local changes up to Firestore — debounced 300ms. Skip if the data
   // change was caused by a remote update we just applied.
   React.useEffect(function(){
     if(!loaded||!fbIsReady)return;
@@ -579,14 +605,23 @@ function App(){
     if(applyingRemoteRef.current){applyingRemoteRef.current=false;return;}
     pendingRef.current=true;
     if(pushTimerRef.current)clearTimeout(pushTimerRef.current);
-    pushTimerRef.current=setTimeout(function(){
-      setSyncing(true);
-      fbPush(data).then(function(ok){
-        setSyncing(false);
-        if(ok){pendingRef.current=false;setLastSync(Date.now());}
-      });
-    },500);
+    pushTimerRef.current=setTimeout(function(){pushNow();},300);
   },[data,loaded,fbIsReady]);
+
+  // Flush pending writes when user leaves the tab (mobile: switch app / close Safari)
+  React.useEffect(function(){
+    if(!loaded||!fbIsReady)return;
+    function onHide(){
+      if(document.visibilityState==="hidden")pushNow({force:true});
+    }
+    function onPageHide(){pushNow({force:true});}
+    document.addEventListener("visibilitychange",onHide);
+    window.addEventListener("pagehide",onPageHide);
+    return function(){
+      document.removeEventListener("visibilitychange",onHide);
+      window.removeEventListener("pagehide",onPageHide);
+    };
+  },[loaded,fbIsReady]);
 
   // Manage Blob URL for the file preview. data: URIs are blocked inside <iframe>
   // by Chrome/Safari (which is why PDF preview was showing as a blank page);
@@ -613,7 +648,7 @@ function App(){
           if(id){
             setData(function(prev){return prev.map(function(en){
               if(en.id!==e.id)return en;
-              return Object.assign({},en,{files:(en.files||[]).map(function(ff){return ff&&ff.name===f.name&&!ff.driveId?Object.assign({},ff,{driveId:id}):ff;}),updatedAt:Date.now()});
+              return Object.assign({},en,{files:(en.files||[]).map(function(ff){return ff&&ff.name===f.name&&!ff.driveId?Object.assign({},ff,{driveId:id}):ff;})});
             });});
           }
           delete uploadingRef.current[key];
@@ -631,20 +666,34 @@ function App(){
   },[lastSync]);
 
   function doSync(){
-    // Firestore subscription already keeps us live. This button just gives
-    // the user a manual nudge + visual feedback that the connection is alive.
-    setSyncing(true);
-    fbPush(data).then(function(ok){
-      setSyncing(false);
-      if(ok){setLastSync(Date.now());notify("🔄 Đã đồng bộ");}
-      else notify("⚠️ Lỗi đồng bộ");
+    pushNow({force:true,toastOnFail:true}).then(function(ok){
+      if(ok)notify("🔄 Đã đồng bộ");
     });
   }
 
   function notify(m){setToast(m);setTimeout(function(){setToast(null);},2500);}
   function uf(k,v){setForm(function(f){var n=Object.assign({},f);n[k]=v;if(k==="venue"){if(VN[v])n.travelMul=VN[v].x;if(VH[v]!==undefined)n.homeTeam=VH[v];}if(k==="competition")n.round="";return n;});}
   function validateForm(){if(!form.date){notify("⚠️ Chọn ngày");return false;}if(!form.venue){notify("⚠️ Chọn sân");return false;}if(form.venue==="Khác"&&!form.customVenue.trim()){notify("⚠️ Nhập tên sân");return false;}return true;}
-  function commitSave(){var now=Date.now();if(eid){setData(function(p){return p.map(function(e){return e.id===eid?Object.assign({},form,{updatedAt:now}):e;});});notify("✅ Cập nhật");}else{setData(function(p){return p.concat([Object.assign({},form,{updatedAt:now})]);});notify("✅ Đã thêm");}setForm(mk());setEid(null);setTab("timeline");}
+  function commitSave(){
+    var now=Date.now();
+    if(eid){
+      setData(function(p){
+        var next=p.map(function(e){return e.id===eid?Object.assign({},form,{updatedAt:now}):e;});
+        dataRef.current=next;
+        return next;
+      });
+      notify("✅ Cập nhật");
+    }else{
+      setData(function(p){
+        var next=p.concat([Object.assign({},form,{updatedAt:now})]);
+        dataRef.current=next;
+        return next;
+      });
+      notify("✅ Đã thêm");
+    }
+    setForm(mk());setEid(null);setTab("timeline");
+    pushNow({force:true,toastOnFail:true});
+  }
   function save(){if(!validateForm())return;if(saving||saved)return;setSaving(true);setTimeout(function(){setSaving(false);setSaved(true);setTimeout(function(){setSaved(false);commitSave();},420);},820);}
   // Animated bulk-mark for payment screens
   function mAllAnim(field,which){if(markAllAnim)return;setMarkAllAnim(which);setTimeout(function(){setMarkAllAnim(null);mAll(field);},900);}
@@ -668,10 +717,10 @@ function App(){
     setUndoData(null);
     notify("↶ Đã hoàn tác");
   }
-  function rm(id){setData(function(p){return p.filter(function(e){return e.id!==id;});});setDelId(null);notify("🗑️ Xoá");}
+  function rm(id){setData(function(p){var next=p.filter(function(e){return e.id!==id;});dataRef.current=next;return next;});setDelId(null);notify("🗑️ Xoá");pushNow({force:true});}
   function ed(e){setForm(Object.assign({},e,{files:e.files||[]}));setEid(e.id);setTab("add");}
-  function tp(id,f){setData(function(p){return p.map(function(e){if(e.id===id){var n=Object.assign({},e);n[f]=!n[f];n.updatedAt=Date.now();return n;}return e;});});}
-  function mAll(f){var ids={};fl().forEach(function(e){ids[e.id]=1;});var now=Date.now();setData(function(p){return p.map(function(e){if(ids[e.id]){var n=Object.assign({},e);n[f]=true;n.updatedAt=now;return n;}return e;});});notify("✅ Xong");}
+  function tp(id,f){setData(function(p){var next=p.map(function(e){if(e.id===id){var n=Object.assign({},e);n[f]=!n[f];n.updatedAt=Date.now();return n;}return e;});dataRef.current=next;return next;});pushNow({force:true});}
+  function mAll(f){var ids={};fl().forEach(function(e){ids[e.id]=1;});var now=Date.now();setData(function(p){var next=p.map(function(e){if(ids[e.id]){var n=Object.assign({},e);n[f]=true;n.updatedAt=now;return n;}return e;});dataRef.current=next;return next;});notify("✅ Xong");pushNow({force:true});}
 
   var fl=React.useCallback(function(){
     var r=data.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
