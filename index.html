@@ -185,7 +185,7 @@ select{appearance:auto}textarea{resize:vertical}
     else if(e.code!=="unimplemented")console.warn("Firestore persistence:",e);
   });
   // Expose for the Babel-transpiled app code below
-  window.__fb = { db, doc, setDoc, onSnapshot, serverTimestamp };
+  window.__fb = { db, doc, setDoc, onSnapshot, serverTimestamp, projectId: firebaseConfig.projectId, apiKey: firebaseConfig.apiKey };
   // Signal readiness — App will wait for this before subscribing
   window.dispatchEvent(new Event("fb-ready"));
 </script>
@@ -327,6 +327,54 @@ async function fbPush(data){
     await window.__fb.setDoc(fbDocRef(),{entries:clean,updatedAt:window.__fb.serverTimestamp()},{merge:true});
     return true;
   }catch(e){console.warn("Firestore push fail:",e);return false;}
+}
+
+// ⭐ TRUYỆT ĐỂ: Push via Firestore REST API with `keepalive: true`.
+// WHY THIS EXISTS:
+// The Firebase JS SDK queues writes through an internal IndexedDB-backed
+// system and a long-lived gRPC-over-WebSocket connection. On mobile, when a
+// browser tab is backgrounded (user switches to another app), iOS/Android
+// can FREEZE the tab's JS execution and tear down its network connections
+// within seconds — long before the SDK's batched write has actually shipped
+// to Google's servers. Result: the user "saves" on phone, switches apps,
+// and the edit is stuck in the phone's local IndexedDB forever (or until
+// they re-open the tab and bring it to the foreground).
+//
+// `fetch(..., {keepalive: true})` is special: the OS guarantees the
+// request is delivered to its destination even after the page is
+// backgrounded, frozen, or unloaded. The Firebase SDK does NOT expose this
+// option, so we bypass it and hit the Firestore REST API directly.
+//
+// This is the same write the SDK would do (single doc set on the path
+// "tracker/var"), just over plain HTTP with the keepalive guarantee.
+// Limits: request body ≤64KB on most browsers when keepalive is set; our
+// payload is well under that since file bytes live in Drive, not here.
+function dataToFirestoreFields(arr){
+  // Convert JS array of entries into Firestore REST "fields" wire format.
+  function v(x){
+    if(x===null||x===undefined)return{nullValue:null};
+    if(typeof x==="boolean")return{booleanValue:x};
+    if(typeof x==="number")return Number.isInteger(x)?{integerValue:String(x)}:{doubleValue:x};
+    if(typeof x==="string")return{stringValue:x};
+    if(Array.isArray(x))return{arrayValue:{values:x.map(v)}};
+    if(typeof x==="object"){var m={};for(var k in x)if(Object.prototype.hasOwnProperty.call(x,k))m[k]=v(x[k]);return{mapValue:{fields:m}};}
+    return{stringValue:String(x)};
+  }
+  return v(arr).arrayValue;
+}
+function fbPushREST(data){
+  if(!fbReady())return Promise.resolve(false);
+  try{
+    var clean=data.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});
+    var pid=window.__fb.projectId,key=window.__fb.apiKey;
+    // PATCH with updateMask → merge behaviour. We use `updatedAtMs` (integer
+    // ms) as a parallel timestamp field; the SDK's serverTimestamp would
+    // require a transform op that's annoying in REST. SDK still maintains
+    // its own `updatedAt` separately on its writes — both coexist fine.
+    var url="https://firestore.googleapis.com/v1/projects/"+pid+"/databases/(default)/documents/"+FB_DOC_PATH[0]+"/"+FB_DOC_PATH[1]+"?updateMask.fieldPaths=entries&updateMask.fieldPaths=updatedAtMs&key="+key;
+    var body={fields:{entries:{arrayValue:dataToFirestoreFields(clean)},updatedAtMs:{integerValue:String(Date.now())}}};
+    return fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),keepalive:true}).then(function(r){return r.ok;}).catch(function(e){console.warn("REST push fail:",e);return false;});
+  }catch(e){console.warn("REST push exception:",e);return Promise.resolve(false);}
 }
 
 // Fire-and-forget beacon push to Apps Script as a redundant fallback for
@@ -649,12 +697,21 @@ function App(){
   //      the OS guarantees delivery for even after the page unloads. Talks to
   //      the Apps Script fallback endpoint.
   // Belt-and-braces, because losing data on tab close is the bug we're fixing.
+  // Flush pending writes when the page is about to be backgrounded/unloaded.
+  // CRITICAL ORDERING:
+  //  1. fbPushREST with keepalive=true — OS-guaranteed delivery. This is the
+  //     one that actually survives iOS/Android freezing the tab. Synchronous
+  //     fire-off (no await needed; browser holds the request).
+  //  2. fbPush via SDK — async, may or may not complete in time; updates
+  //     local Firestore cache so the SDK doesn't replay an older snapshot.
+  //  3. beaconPush — extra Apps Script fallback (best-effort backup to Sheets).
   React.useEffect(function(){
     if(!loaded||!fbIsReady)return;
     function flush(){
       var snap=dataRef.current;
-      pushNow({force:true,data:snap});
-      beaconPush(snap);
+      fbPushREST(snap);     // ⭐ keepalive — primary
+      pushNow({force:true,data:snap}); // SDK — secondary
+      beaconPush(snap);     // Apps Script — tertiary backup
     }
     function onVisChange(){
       if(document.visibilityState==="hidden")flush();
@@ -716,7 +773,8 @@ function App(){
 
   function doSync(){
     var snap=dataRef.current;
-    beaconPush(snap); // belt-and-braces backup
+    fbPushREST(snap); // keepalive — primary
+    beaconPush(snap); // belt-and-braces backup to Apps Script
     pushNow({force:true,toastOnFail:true,data:snap}).then(function(ok){
       if(ok)notify("🔄 Đã đồng bộ");
     });
@@ -742,8 +800,11 @@ function App(){
     saveLocal(next);
     setData(next);
     setForm(mk());setEid(null);setTab("timeline");
-    // Pass `next` explicitly so pushNow doesn't depend on React having
-    // committed the setState yet.
+    // ⭐ keepalive REST push — works even if user immediately backgrounds the
+    // tab. Fired BEFORE the SDK push so the request is in OS hands first.
+    fbPushREST(next);
+    // SDK push as well — updates Firestore local cache so the realtime
+    // listener doesn't replay an older snapshot on top of us.
     pushNow({force:true,toastOnFail:true,data:next});
   }
   function save(){if(!validateForm())return;if(saving||saved)return;setSaving(true);setTimeout(function(){setSaving(false);setSaved(true);setTimeout(function(){setSaved(false);commitSave();},420);},820);}
@@ -777,6 +838,7 @@ function App(){
     setData(next);
     setDelId(null);
     notify("🗑️ Xoá");
+    fbPushREST(next);
     pushNow({force:true,data:next});
   }
   function ed(e){setForm(Object.assign({},e,{files:e.files||[]}));setEid(e.id);setTab("add");}
@@ -786,6 +848,7 @@ function App(){
     dataRef.current=next;
     saveLocal(next);
     setData(next);
+    fbPushREST(next);
     pushNow({force:true,data:next});
   }
   function mAll(f){
@@ -796,6 +859,7 @@ function App(){
     saveLocal(next);
     setData(next);
     notify("✅ Xong");
+    fbPushREST(next);
     pushNow({force:true,data:next});
   }
 
