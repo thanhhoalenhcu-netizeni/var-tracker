@@ -385,6 +385,50 @@ function fbPushREST(data){
   }catch(e){console.warn("[REST] exception:",e&&e.message||e);return Promise.resolve(false);}
 }
 
+// ⭐ Pull current Firestore doc via REST API, bypassing the SDK's IndexedDB
+// cache. WHY: when the app boots and `onSnapshot` subscribes, the FIRST
+// snapshot the SDK delivers is from local IndexedDB cache, NOT from the
+// server. If the desktop session was previously closed while data on the
+// phone was being edited, the desktop's cache is stale by definition.
+// The SDK eventually pulls fresh data from server and fires onSnapshot
+// again, but this can take seconds-to-minutes depending on network
+// conditions and SDK reconnect heuristics — during which the user sees
+// stale data and concludes "sync is broken". Pulling REST on boot bypasses
+// the cache entirely and gives an authoritative server view immediately.
+function firestoreValueToJS(v){
+  if(!v)return null;
+  if("nullValue" in v)return null;
+  if("booleanValue" in v)return v.booleanValue;
+  if("stringValue" in v)return v.stringValue;
+  if("integerValue" in v)return parseInt(v.integerValue,10);
+  if("doubleValue" in v)return Number(v.doubleValue);
+  if("timestampValue" in v)return v.timestampValue;
+  if("arrayValue" in v)return((v.arrayValue&&v.arrayValue.values)||[]).map(firestoreValueToJS);
+  if("mapValue" in v){var o={},f=(v.mapValue&&v.mapValue.fields)||{};for(var k in f)o[k]=firestoreValueToJS(f[k]);return o;}
+  return null;
+}
+function fbPullREST(){
+  if(!fbReady())return Promise.resolve(null);
+  try{
+    var pid=window.__fb.projectId,key=window.__fb.apiKey;
+    if(!pid||!key)return Promise.resolve(null);
+    var url="https://firestore.googleapis.com/v1/projects/"+pid+"/databases/(default)/documents/"+FB_DOC_PATH[0]+"/"+FB_DOC_PATH[1]+"?key="+key;
+    console.log("[REST] pulling from server (bypassing SDK cache)");
+    return fetch(url,{method:"GET",cache:"no-store"}).then(function(r){
+      if(!r.ok){
+        if(r.status===404){console.log("[REST] pull: doc doesn't exist yet (empty cloud)");return [];}
+        return r.text().then(function(t){console.warn("[REST] ❌ pull FAIL ("+r.status+")",t);return null;});
+      }
+      return r.json().then(function(j){
+        var fields=j.fields||{};
+        var entries=fields.entries?firestoreValueToJS(fields.entries):[];
+        console.log("[REST] ✅ pull ok — "+(entries?entries.length:0)+" entries from server");
+        return Array.isArray(entries)?entries:[];
+      });
+    }).catch(function(e){console.warn("[REST] pull network error:",e&&e.message||e);return null;});
+  }catch(e){console.warn("[REST] pull exception:",e&&e.message||e);return Promise.resolve(null);}
+}
+
 // Fire-and-forget beacon push to Apps Script as a redundant fallback for
 // `pagehide` / tab-close on mobile. The problem: when Safari/Chrome on iOS
 // kills a tab, the Firestore SDK's pending IndexedDB→network sync can be
@@ -620,6 +664,7 @@ function App(){
     window.__debug={
       fbInfo:function(){console.log("fbReady:",fbReady(),"window.__fb:",window.__fb);},
       testREST:function(){return fbPushREST(dataRef.current).then(function(ok){console.log("testREST result:",ok);return ok;});},
+      testPull:function(){return fbPullREST().then(function(c){console.log("testPull result:",c?c.length+" entries":"null");return c;});},
       testSDK:function(){return fbPush(dataRef.current).then(function(ok){console.log("testSDK result:",ok);return ok;});},
       snapshot:function(){return dataRef.current;}
     };
@@ -675,10 +720,39 @@ function App(){
     setLoaded(true);
   },[]);
 
-  // Subscribe to Firestore once SDK is ready and we've loaded local data.
-  // Realtime: any change on any device delivers here within ~300ms.
+  // Subscribe to Firestore + force-pull from server on mount.
+  //
+  // The order matters:
+  // 1. fbPullREST first — REST API hits the server directly, ignoring the
+  //    SDK's IndexedDB cache. If the desktop was closed while phone was
+  //    pushing updates, the SDK cache is stale; REST gives us truth.
+  //    Merge result into local state immediately so user sees fresh data.
+  // 2. THEN fbSubscribe — sets up the realtime listener for ongoing changes.
+  //    Subsequent snapshots from onSnapshot handle live updates from other
+  //    devices.
   React.useEffect(function(){
     if(!loaded||!fbIsReady)return;
+    var unmounted=false;
+    // Step 1: REST pull from server, bypassing SDK cache
+    fbPullREST().then(function(cloud){
+      if(unmounted||cloud===null)return; // null = network error, keep local
+      var local=loadLocal();
+      if(cloud.length===0&&local.length>0){
+        // Cloud is empty but we have local → push our state up
+        fbPushREST(local);
+        return;
+      }
+      var merged=smartMerge(cloud,local);
+      var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
+      if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged))){
+        applyingRemoteRef.current=true;
+        setData(merged);
+        saveLocal(merged);
+        notify("🔄 Đã cập nhật");
+      }
+      setLastSync(Date.now());
+    });
+    // Step 2: realtime listener for ongoing changes
     var unsub=fbSubscribe(function(cloud){
       var local=loadLocal();
       // First-ever subscribe: cloud may be empty → push our local up if we have any
@@ -696,7 +770,7 @@ function App(){
       }
       setLastSync(Date.now());
     });
-    return unsub;
+    return function(){unmounted=true;unsub&&unsub();};
   },[loaded,fbIsReady]);
 
   // Save to localStorage on every data change. Push to cloud is handled at
@@ -733,7 +807,24 @@ function App(){
       beaconPush(snap);     // Apps Script backup (best-effort)
     }
     function onVisChange(){
-      if(document.visibilityState==="hidden")flush();
+      if(document.visibilityState==="hidden"){flush();return;}
+      // Visible again — force-pull fresh data from server (bypassing SDK
+      // cache) in case another device pushed while this tab was backgrounded.
+      // SDK's onSnapshot will also eventually re-sync but can be slow to
+      // notice changes when reconnecting from background.
+      fbPullREST().then(function(cloud){
+        if(cloud===null)return;
+        var local=loadLocal();
+        var merged=smartMerge(cloud,local);
+        var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
+        if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged))){
+          applyingRemoteRef.current=true;
+          setData(merged);
+          saveLocal(merged);
+          notify("🔄 Đã cập nhật");
+        }
+        setLastSync(Date.now());
+      });
     }
     function onPageHide(){flush();}
     document.addEventListener("visibilitychange",onVisChange);
@@ -791,12 +882,26 @@ function App(){
   },[lastSync]);
 
   function doSync(){
-    var snap=dataRef.current;
-    beaconPush(snap); // belt-and-braces backup to Apps Script
-    fbPushREST(snap).then(function(ok){
-      if(ok){setLastSync(Date.now());notify("🔄 Đã đồng bộ");}
-      else notify("⚠️ Lỗi đồng bộ — thử lại");
+    setSyncing(true);
+    // Step 1: pull fresh server state, merge with any unpushed local changes
+    fbPullREST().then(function(cloud){
+      if(cloud===null){setSyncing(false);notify("⚠️ Lỗi đồng bộ");return null;}
+      var local=loadLocal();
+      var merged=smartMerge(cloud,local);
+      var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
+      if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged))){
+        applyingRemoteRef.current=true;
+        setData(merged);
+        dataRef.current=merged;
+        saveLocal(merged);
+      }
+      // Step 2: push merged result up so cloud and this device fully agree
+      return fbPushREST(merged);
+    }).then(function(ok){
+      setSyncing(false);
+      if(ok!==null){setLastSync(Date.now());notify("🔄 Đã đồng bộ");}
     });
+    beaconPush(dataRef.current); // belt-and-braces backup to Apps Script
   }
 
   function notify(m){setToast(m);setTimeout(function(){setToast(null);},2500);}
