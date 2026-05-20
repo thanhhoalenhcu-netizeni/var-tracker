@@ -682,7 +682,7 @@ function App(){
     var unsub=fbSubscribe(function(cloud){
       var local=loadLocal();
       // First-ever subscribe: cloud may be empty → push our local up if we have any
-      if((!cloud||cloud.length===0)&&local.length>0){fbPush(local);return;}
+      if((!cloud||cloud.length===0)&&local.length>0){fbPushREST(local);return;}
       var merged=smartMerge(cloud||[],local);
       // Avoid no-op rerenders + don't trigger our own push effect
       var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
@@ -699,15 +699,17 @@ function App(){
     return unsub;
   },[loaded,fbIsReady]);
 
-  // Push local changes up to Firestore — debounced 300ms. Skip if the data
-  // change was caused by a remote update we just applied.
+  // Save to localStorage on every data change. Push to cloud is handled at
+  // the action level (commitSave / tp / rm / mAll all call fbPushREST
+  // synchronously), so we DO NOT push from this effect anymore — doing so
+  // creates a race where a debounced SDK write fires AFTER the REST write
+  // and, if the SDK connection gets aborted (iOS freezing the tab), can
+  // overwrite the REST write with stale state.
   React.useEffect(function(){
     if(!loaded||!fbIsReady)return;
     saveLocal(data);
     if(applyingRemoteRef.current){applyingRemoteRef.current=false;return;}
-    pendingRef.current=true;
-    if(pushTimerRef.current)clearTimeout(pushTimerRef.current);
-    pushTimerRef.current=setTimeout(function(){pushNow();},300);
+    // Don't schedule a push — actions push directly via fbPushREST.
   },[data,loaded,fbIsReady]);
 
   // Flush pending writes when user leaves the tab (mobile: switch app / close
@@ -720,20 +722,15 @@ function App(){
   //      the Apps Script fallback endpoint.
   // Belt-and-braces, because losing data on tab close is the bug we're fixing.
   // Flush pending writes when the page is about to be backgrounded/unloaded.
-  // CRITICAL ORDERING:
-  //  1. fbPushREST with keepalive=true — OS-guaranteed delivery. This is the
-  //     one that actually survives iOS/Android freezing the tab. Synchronous
-  //     fire-off (no await needed; browser holds the request).
-  //  2. fbPush via SDK — async, may or may not complete in time; updates
-  //     local Firestore cache so the SDK doesn't replay an older snapshot.
-  //  3. beaconPush — extra Apps Script fallback (best-effort backup to Sheets).
+  // Use ONLY fbPushREST (with keepalive) — it's the one the OS guarantees to
+  // deliver. SDK push here would race REST and potentially lose to it on iOS
+  // tab freeze. beaconPush is the last-resort backup to Apps Script.
   React.useEffect(function(){
     if(!loaded||!fbIsReady)return;
     function flush(){
       var snap=dataRef.current;
-      fbPushREST(snap);     // ⭐ keepalive — primary
-      pushNow({force:true,data:snap}); // SDK — secondary
-      beaconPush(snap);     // Apps Script — tertiary backup
+      fbPushREST(snap);     // ⭐ keepalive — primary and only Firestore path on unload
+      beaconPush(snap);     // Apps Script backup (best-effort)
     }
     function onVisChange(){
       if(document.visibilityState==="hidden")flush();
@@ -795,10 +792,10 @@ function App(){
 
   function doSync(){
     var snap=dataRef.current;
-    fbPushREST(snap); // keepalive — primary
     beaconPush(snap); // belt-and-braces backup to Apps Script
-    pushNow({force:true,toastOnFail:true,data:snap}).then(function(ok){
-      if(ok)notify("🔄 Đã đồng bộ");
+    fbPushREST(snap).then(function(ok){
+      if(ok){setLastSync(Date.now());notify("🔄 Đã đồng bộ");}
+      else notify("⚠️ Lỗi đồng bộ — thử lại");
     });
   }
 
@@ -822,12 +819,18 @@ function App(){
     saveLocal(next);
     setData(next);
     setForm(mk());setEid(null);setTab("timeline");
-    // ⭐ keepalive REST push — works even if user immediately backgrounds the
-    // tab. Fired BEFORE the SDK push so the request is in OS hands first.
-    fbPushREST(next);
-    // SDK push as well — updates Firestore local cache so the realtime
-    // listener doesn't replay an older snapshot on top of us.
-    pushNow({force:true,toastOnFail:true,data:next});
+    // ⭐ REST push with keepalive — the OS guarantees delivery even if the
+    // user immediately backgrounds the tab. We intentionally do NOT also call
+    // the SDK push here: that would race the REST write (SDK connection can
+    // get aborted by iOS freezing the tab, after which the SDK may overwrite
+    // our REST write with stale state on its next reconnect).
+    fbPushREST(next).then(function(ok){
+      if(!ok){
+        // Only fall back to SDK push if REST failed — last-resort save attempt
+        notify("⚠️ REST sync fail — retry via SDK");
+        pushNow({force:true,toastOnFail:true,data:next});
+      }
+    });
   }
   function save(){if(!validateForm())return;if(saving||saved)return;setSaving(true);setTimeout(function(){setSaving(false);setSaved(true);setTimeout(function(){setSaved(false);commitSave();},420);},820);}
   // Animated bulk-mark for payment screens
@@ -860,8 +863,7 @@ function App(){
     setData(next);
     setDelId(null);
     notify("🗑️ Xoá");
-    fbPushREST(next);
-    pushNow({force:true,data:next});
+    fbPushREST(next).then(function(ok){if(!ok)pushNow({force:true,data:next});});
   }
   function ed(e){setForm(Object.assign({},e,{files:e.files||[]}));setEid(e.id);setTab("add");}
   function tp(id,f){
@@ -870,8 +872,7 @@ function App(){
     dataRef.current=next;
     saveLocal(next);
     setData(next);
-    fbPushREST(next);
-    pushNow({force:true,data:next});
+    fbPushREST(next).then(function(ok){if(!ok)pushNow({force:true,data:next});});
   }
   function mAll(f){
     var ids={};fl().forEach(function(e){ids[e.id]=1;});
@@ -881,8 +882,7 @@ function App(){
     saveLocal(next);
     setData(next);
     notify("✅ Xong");
-    fbPushREST(next);
-    pushNow({force:true,data:next});
+    fbPushREST(next).then(function(ok){if(!ok)pushNow({force:true,data:next});});
   }
 
   var fl=React.useCallback(function(){
