@@ -321,12 +321,14 @@ function fbDocRef(){var f=window.__fb;return f.doc(f.db,FB_DOC_PATH[0],FB_DOC_PA
 
 // Push current data to Firestore. Files keep only metadata (driveId), not bytes.
 async function fbPush(data){
-  if(!fbReady())return false;
+  if(!fbReady()){console.log("[SDK] skip — fb not ready");return false;}
   try{
     var clean=data.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});
+    console.log("[SDK] pushing",clean.length,"entries via Firebase SDK");
     await window.__fb.setDoc(fbDocRef(),{entries:clean,updatedAt:window.__fb.serverTimestamp()},{merge:true});
+    console.log("[SDK] ✅ push ok");
     return true;
-  }catch(e){console.warn("Firestore push fail:",e);return false;}
+  }catch(e){console.warn("[SDK] ❌ push fail:",e&&e.message||e);return false;}
 }
 
 // ⭐ TRUYỆT ĐỂ: Push via Firestore REST API with `keepalive: true`.
@@ -363,18 +365,24 @@ function dataToFirestoreFields(arr){
   return v(arr).arrayValue;
 }
 function fbPushREST(data){
-  if(!fbReady())return Promise.resolve(false);
+  if(!fbReady()){console.log("[REST] skip — fb not ready");return Promise.resolve(false);}
   try{
     var clean=data.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});
     var pid=window.__fb.projectId,key=window.__fb.apiKey;
+    if(!pid||!key){console.warn("[REST] missing projectId or apiKey",pid,key);return Promise.resolve(false);}
     // PATCH with updateMask → merge behaviour. We use `updatedAtMs` (integer
     // ms) as a parallel timestamp field; the SDK's serverTimestamp would
     // require a transform op that's annoying in REST. SDK still maintains
     // its own `updatedAt` separately on its writes — both coexist fine.
     var url="https://firestore.googleapis.com/v1/projects/"+pid+"/databases/(default)/documents/"+FB_DOC_PATH[0]+"/"+FB_DOC_PATH[1]+"?updateMask.fieldPaths=entries&updateMask.fieldPaths=updatedAtMs&key="+key;
     var body={fields:{entries:{arrayValue:dataToFirestoreFields(clean)},updatedAtMs:{integerValue:String(Date.now())}}};
-    return fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),keepalive:true}).then(function(r){return r.ok;}).catch(function(e){console.warn("REST push fail:",e);return false;});
-  }catch(e){console.warn("REST push exception:",e);return Promise.resolve(false);}
+    console.log("[REST] pushing",clean.length,"entries to Firestore via REST API (keepalive)");
+    return fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),keepalive:true}).then(function(r){
+      if(r.ok){console.log("[REST] ✅ push ok ("+r.status+")");return true;}
+      // Read error body for clearer diagnosis (403 = rules, 400 = bad body, etc)
+      return r.text().then(function(t){console.warn("[REST] ❌ push FAIL ("+r.status+")",t);return false;});
+    }).catch(function(e){console.warn("[REST] network error:",e&&e.message||e);return false;});
+  }catch(e){console.warn("[REST] exception:",e&&e.message||e);return Promise.resolve(false);}
 }
 
 // Fire-and-forget beacon push to Apps Script as a redundant fallback for
@@ -602,6 +610,20 @@ function App(){
   var[calSel,setCalSel]=React.useState(null);
   var aiRef=React.useRef(null);
   var fileRef=React.useRef(null);
+
+  // Debug hooks — open browser console and run e.g.:
+  //   window.__debug.testREST()   → tries a REST push with current data
+  //   window.__debug.testSDK()    → tries an SDK push
+  //   window.__debug.fbInfo()     → shows projectId / apiKey / SDK ready state
+  //   window.__debug.snapshot()   → dumps current in-memory data
+  React.useEffect(function(){
+    window.__debug={
+      fbInfo:function(){console.log("fbReady:",fbReady(),"window.__fb:",window.__fb);},
+      testREST:function(){return fbPushREST(dataRef.current).then(function(ok){console.log("testREST result:",ok);return ok;});},
+      testSDK:function(){return fbPush(dataRef.current).then(function(ok){console.log("testSDK result:",ok);return ok;});},
+      snapshot:function(){return dataRef.current;}
+    };
+  },[]);
 
   // === Firestore realtime sync ===
   // Pattern: subscribe once to the doc; every write from any device flows back
