@@ -324,12 +324,12 @@ function fbReady(){return !!(window.__fb&&window.__fb.db);}
 function fbDocRef(){var f=window.__fb;return f.doc(f.db,FB_DOC_PATH[0],FB_DOC_PATH[1]);}
 
 // Push current data to Firestore. Files keep only metadata (driveId), not bytes.
-async function fbPush(data){
+async function fbPush(data,notes){
   if(!fbReady()){console.log("[SDK] skip — fb not ready");return false;}
   try{
     var clean=data.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});
     console.log("[SDK] pushing",clean.length,"entries via Firebase SDK");
-    await window.__fb.setDoc(fbDocRef(),{entries:clean,updatedAt:window.__fb.serverTimestamp()},{merge:true});
+    await window.__fb.setDoc(fbDocRef(),{entries:clean,payNotes:notes||[],updatedAt:window.__fb.serverTimestamp()},{merge:true});
     console.log("[SDK] ✅ push ok");
     return true;
   }catch(e){console.warn("[SDK] ❌ push fail:",e&&e.message||e);return false;}
@@ -368,7 +368,7 @@ function dataToFirestoreFields(arr){
   }
   return v(arr).arrayValue;
 }
-function fbPushREST(data){
+function fbPushREST(data,notes){
   if(!fbReady()){console.log("[REST] skip — fb not ready");return Promise.resolve(false);}
   try{
     var clean=data.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});
@@ -378,8 +378,8 @@ function fbPushREST(data){
     // ms) as a parallel timestamp field; the SDK's serverTimestamp would
     // require a transform op that's annoying in REST. SDK still maintains
     // its own `updatedAt` separately on its writes — both coexist fine.
-    var url="https://firestore.googleapis.com/v1/projects/"+pid+"/databases/(default)/documents/"+FB_DOC_PATH[0]+"/"+FB_DOC_PATH[1]+"?updateMask.fieldPaths=entries&updateMask.fieldPaths=updatedAtMs&key="+key;
-    var body={fields:{entries:{arrayValue:dataToFirestoreFields(clean)},updatedAtMs:{integerValue:String(Date.now())}}};
+    var url="https://firestore.googleapis.com/v1/projects/"+pid+"/databases/(default)/documents/"+FB_DOC_PATH[0]+"/"+FB_DOC_PATH[1]+"?updateMask.fieldPaths=entries&updateMask.fieldPaths=payNotes&updateMask.fieldPaths=updatedAtMs&key="+key;
+    var body={fields:{entries:{arrayValue:dataToFirestoreFields(clean)},payNotes:{arrayValue:dataToFirestoreFields(notes||[])},updatedAtMs:{integerValue:String(Date.now())}}};
     console.log("[REST] pushing",clean.length,"entries to Firestore via REST API (keepalive)");
     return fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),keepalive:true}).then(function(r){
       if(r.ok){console.log("[REST] ✅ push ok ("+r.status+")");return true;}
@@ -420,14 +420,15 @@ function fbPullREST(){
     console.log("[REST] pulling from server (bypassing SDK cache)");
     return fetch(url,{method:"GET",cache:"no-store"}).then(function(r){
       if(!r.ok){
-        if(r.status===404){console.log("[REST] pull: doc doesn't exist yet (empty cloud)");return [];}
+        if(r.status===404){console.log("[REST] pull: doc doesn't exist yet (empty cloud)");return {entries:[],payNotes:[]};}
         return r.text().then(function(t){console.warn("[REST] ❌ pull FAIL ("+r.status+")",t);return null;});
       }
       return r.json().then(function(j){
         var fields=j.fields||{};
         var entries=fields.entries?firestoreValueToJS(fields.entries):[];
+        var payNotes=fields.payNotes?firestoreValueToJS(fields.payNotes):[];
         console.log("[REST] ✅ pull ok — "+(entries?entries.length:0)+" entries from server");
-        return Array.isArray(entries)?entries:[];
+        return {entries:Array.isArray(entries)?entries:[],payNotes:Array.isArray(payNotes)?payNotes:[]};
       });
     }).catch(function(e){console.warn("[REST] pull network error:",e&&e.message||e);return null;});
   }catch(e){console.warn("[REST] pull exception:",e&&e.message||e);return Promise.resolve(null);}
@@ -460,8 +461,8 @@ function fbSubscribe(cb){
   if(!fbReady())return function(){};
   try{
     return window.__fb.onSnapshot(fbDocRef(),function(snap){
-      if(!snap.exists())return cb([]);
-      var d=snap.data();cb(Array.isArray(d.entries)?d.entries:[]);
+      if(!snap.exists())return cb({entries:[],payNotes:[]});
+      var d=snap.data();cb({entries:Array.isArray(d.entries)?d.entries:[],payNotes:Array.isArray(d.payNotes)?d.payNotes:[]});
     },function(err){console.warn("Firestore subscribe error:",err);});
   }catch(e){console.warn("Firestore subscribe fail:",e);return function(){};}
 }
@@ -766,9 +767,10 @@ function App(){
     // Step 2: realtime listener for ongoing changes
     var unsub=fbSubscribe(function(cloud){
       var local=loadLocal();
+      var cloudEntries=cloud.entries||[];
       // First-ever subscribe: cloud may be empty → push our local up if we have any
-      if((!cloud||cloud.length===0)&&local.length>0){fbPushREST(local);return;}
-      var merged=smartMerge(cloud||[],local);
+      if(cloudEntries.length===0&&local.length>0){fbPushREST(local,payNotes);return;}
+      var merged=smartMerge(cloudEntries,local);
       // Avoid no-op rerenders + don't trigger our own push effect
       var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
       var hLocal=JSON.stringify(stripD(local));
@@ -779,6 +781,8 @@ function App(){
         saveLocal(merged);
         notify("🔄 Đã cập nhật");
       }
+      var mergedNotes=mergePayNotes(cloud.payNotes,payNotes);
+      if(JSON.stringify(mergedNotes)!==JSON.stringify(payNotes)){setPayNotes(mergedNotes);}
       setLastSync(Date.now());
     });
     return function(){unmounted=true;unsub&&unsub();};
@@ -892,13 +896,14 @@ function App(){
     return function(){clearTimeout(t);};
   },[lastSync]);
 
+  function mergePayNotes(a,b){var seen={};return(a||[]).concat(b||[]).filter(function(n){if(!n||!n.at||seen[n.at])return false;seen[n.at]=true;return true;}).sort(function(x,y){return y.at.localeCompare(x.at);});}
   function doSync(){
     setSyncing(true);
     // Step 1: pull fresh server state, merge with any unpushed local changes
     fbPullREST().then(function(cloud){
       if(cloud===null){setSyncing(false);notify("⚠️ Lỗi đồng bộ");return null;}
       var local=loadLocal();
-      var merged=smartMerge(cloud,local);
+      var merged=smartMerge(cloud.entries,local);
       var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
       if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged))){
         applyingRemoteRef.current=true;
@@ -906,8 +911,10 @@ function App(){
         dataRef.current=merged;
         saveLocal(merged);
       }
+      var mergedNotes=mergePayNotes(cloud.payNotes,payNotes);
+      if(JSON.stringify(mergedNotes)!==JSON.stringify(payNotes)){setPayNotes(mergedNotes);}
       // Step 2: push merged result up so cloud and this device fully agree
-      return fbPushREST(merged);
+      return fbPushREST(merged,mergedNotes);
     }).then(function(ok){
       setSyncing(false);
       if(ok!==null){setLastSync(Date.now());notify("🔄 Đã đồng bộ");}
