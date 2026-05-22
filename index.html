@@ -319,150 +319,147 @@ function savePayNotes(n){try{localStorage.setItem(PAY_NOTES_KEY,JSON.stringify(n
 // Document path: /tracker/var (single doc, contains entire data array). Small
 // dataset (~hundreds of matches × ~1KB metadata each) so monolithic doc is
 // simpler than collection-per-entry and keeps cost low. Files stay in Drive.
-var FB_DOC_PATH=["tracker","var"]; // doc(db,"tracker","var")
 function fbReady(){return !!(window.__fb&&window.__fb.db);}
-function fbDocRef(){var f=window.__fb;return f.doc(f.db,FB_DOC_PATH[0],FB_DOC_PATH[1]);}
 
-// Push current data to Firestore. Files keep only metadata (driveId), not bytes.
-async function fbPush(data,notes){
-  if(!fbReady()){console.log("[SDK] skip — fb not ready");return false;}
-  try{
-    var clean=data.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});
-    console.log("[SDK] pushing",clean.length,"entries via Firebase SDK");
-    await window.__fb.setDoc(fbDocRef(),{entries:clean,payNotes:notes||[],updatedAt:window.__fb.serverTimestamp()},{merge:true});
-    console.log("[SDK] ✅ push ok");
-    return true;
-  }catch(e){console.warn("[SDK] ❌ push fail:",e&&e.message||e);return false;}
-}
-
-// ⭐ TRUYỆT ĐỂ: Push via Firestore REST API with `keepalive: true`.
-// WHY THIS EXISTS:
-// The Firebase JS SDK queues writes through an internal IndexedDB-backed
-// system and a long-lived gRPC-over-WebSocket connection. On mobile, when a
-// browser tab is backgrounded (user switches to another app), iOS/Android
-// can FREEZE the tab's JS execution and tear down its network connections
-// within seconds — long before the SDK's batched write has actually shipped
-// to Google's servers. Result: the user "saves" on phone, switches apps,
-// and the edit is stuck in the phone's local IndexedDB forever (or until
-// they re-open the tab and bring it to the foreground).
+// === Firestore Sync Engine ===
+// Single module for all push / pull / subscribe to Firestore.
+// ⭐ Writes use REST + keepalive so the OS delivers them even after the page is
+//    backgrounded/frozen — unlike the Firebase SDK which queues writes in
+//    IndexedDB and can be aborted when iOS/Android freezes the JS thread.
+// ⭐ Reads on boot use REST (no-cache) to bypass the SDK's stale IndexedDB snapshot.
+// ⭐ Realtime updates use SDK onSnapshot — still the fastest path for live changes.
 //
-// `fetch(..., {keepalive: true})` is special: the OS guarantees the
-// request is delivered to its destination even after the page is
-// backgrounded, frozen, or unloaded. The Firebase SDK does NOT expose this
-// option, so we bypass it and hit the Firestore REST API directly.
-//
-// This is the same write the SDK would do (single doc set on the path
-// "tracker/var"), just over plain HTTP with the keepalive guarantee.
-// Limits: request body ≤64KB on most browsers when keepalive is set; our
-// payload is well under that since file bytes live in Drive, not here.
-function dataToFirestoreFields(arr){
-  // Convert JS array of entries into Firestore REST "fields" wire format.
-  function v(x){
+// To add a new synced field in the future:
+//   sync.register("fieldName", { merger, encode, decode })
+// push / pull / subscribe pick it up automatically — no other changes needed.
+function createSyncEngine(docPath){
+  var _fields={};
+  function ready(){return !!(window.__fb&&window.__fb.db);}
+  function cred(){var fb=window.__fb||{};return{pid:fb.projectId,key:fb.apiKey};}
+  function baseUrl(){var c=cred();return"https://firestore.googleapis.com/v1/projects/"+c.pid+"/databases/(default)/documents/"+docPath;}
+  // Internal: JS value → Firestore REST wire format
+  function toFS(x){
     if(x===null||x===undefined)return{nullValue:null};
     if(typeof x==="boolean")return{booleanValue:x};
     if(typeof x==="number")return Number.isInteger(x)?{integerValue:String(x)}:{doubleValue:x};
     if(typeof x==="string")return{stringValue:x};
-    if(Array.isArray(x))return{arrayValue:{values:x.map(v)}};
-    if(typeof x==="object"){var m={};for(var k in x)if(Object.prototype.hasOwnProperty.call(x,k))m[k]=v(x[k]);return{mapValue:{fields:m}};}
+    if(Array.isArray(x))return{arrayValue:{values:x.map(toFS)}};
+    if(typeof x==="object"){var m={};for(var k in x)if(Object.prototype.hasOwnProperty.call(x,k))m[k]=toFS(x[k]);return{mapValue:{fields:m}};}
     return{stringValue:String(x)};
   }
-  return v(arr).arrayValue;
-}
-function fbPushREST(data,notes){
-  if(!fbReady()){console.log("[REST] skip — fb not ready");return Promise.resolve(false);}
-  try{
-    var clean=data.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});
-    var pid=window.__fb.projectId,key=window.__fb.apiKey;
-    if(!pid||!key){console.warn("[REST] missing projectId or apiKey",pid,key);return Promise.resolve(false);}
-    // PATCH with updateMask → merge behaviour. We use `updatedAtMs` (integer
-    // ms) as a parallel timestamp field; the SDK's serverTimestamp would
-    // require a transform op that's annoying in REST. SDK still maintains
-    // its own `updatedAt` separately on its writes — both coexist fine.
-    var url="https://firestore.googleapis.com/v1/projects/"+pid+"/databases/(default)/documents/"+FB_DOC_PATH[0]+"/"+FB_DOC_PATH[1]+"?updateMask.fieldPaths=entries&updateMask.fieldPaths=payNotes&updateMask.fieldPaths=updatedAtMs&key="+key;
-    var body={fields:{entries:{arrayValue:dataToFirestoreFields(clean)},payNotes:{arrayValue:dataToFirestoreFields(notes||[])},updatedAtMs:{integerValue:String(Date.now())}}};
-    console.log("[REST] pushing",clean.length,"entries to Firestore via REST API (keepalive)");
-    return fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),keepalive:true}).then(function(r){
-      if(r.ok){console.log("[REST] ✅ push ok ("+r.status+")");return true;}
-      // Read error body for clearer diagnosis (403 = rules, 400 = bad body, etc)
-      return r.text().then(function(t){console.warn("[REST] ❌ push FAIL ("+r.status+")",t);return false;});
-    }).catch(function(e){console.warn("[REST] network error:",e&&e.message||e);return false;});
-  }catch(e){console.warn("[REST] exception:",e&&e.message||e);return Promise.resolve(false);}
-}
-
-// ⭐ Pull current Firestore doc via REST API, bypassing the SDK's IndexedDB
-// cache. WHY: when the app boots and `onSnapshot` subscribes, the FIRST
-// snapshot the SDK delivers is from local IndexedDB cache, NOT from the
-// server. If the desktop session was previously closed while data on the
-// phone was being edited, the desktop's cache is stale by definition.
-// The SDK eventually pulls fresh data from server and fires onSnapshot
-// again, but this can take seconds-to-minutes depending on network
-// conditions and SDK reconnect heuristics — during which the user sees
-// stale data and concludes "sync is broken". Pulling REST on boot bypasses
-// the cache entirely and gives an authoritative server view immediately.
-function firestoreValueToJS(v){
-  if(!v)return null;
-  if("nullValue" in v)return null;
-  if("booleanValue" in v)return v.booleanValue;
-  if("stringValue" in v)return v.stringValue;
-  if("integerValue" in v)return parseInt(v.integerValue,10);
-  if("doubleValue" in v)return Number(v.doubleValue);
-  if("timestampValue" in v)return v.timestampValue;
-  if("arrayValue" in v)return((v.arrayValue&&v.arrayValue.values)||[]).map(firestoreValueToJS);
-  if("mapValue" in v){var o={},f=(v.mapValue&&v.mapValue.fields)||{};for(var k in f)o[k]=firestoreValueToJS(f[k]);return o;}
-  return null;
-}
-function fbPullREST(){
-  if(!fbReady())return Promise.resolve(null);
-  try{
-    var pid=window.__fb.projectId,key=window.__fb.apiKey;
-    if(!pid||!key)return Promise.resolve(null);
-    var url="https://firestore.googleapis.com/v1/projects/"+pid+"/databases/(default)/documents/"+FB_DOC_PATH[0]+"/"+FB_DOC_PATH[1]+"?key="+key;
-    console.log("[REST] pulling from server (bypassing SDK cache)");
-    return fetch(url,{method:"GET",cache:"no-store"}).then(function(r){
-      if(!r.ok){
-        if(r.status===404){console.log("[REST] pull: doc doesn't exist yet (empty cloud)");return {entries:[],payNotes:[]};}
-        return r.text().then(function(t){console.warn("[REST] ❌ pull FAIL ("+r.status+")",t);return null;});
-      }
+  // Internal: Firestore REST wire format → JS value
+  function fromFS(v){
+    if(!v)return null;
+    if("nullValue" in v)return null;
+    if("booleanValue" in v)return v.booleanValue;
+    if("stringValue" in v)return v.stringValue;
+    if("integerValue" in v)return parseInt(v.integerValue,10);
+    if("doubleValue" in v)return Number(v.doubleValue);
+    if("timestampValue" in v)return v.timestampValue;
+    if("arrayValue" in v)return((v.arrayValue&&v.arrayValue.values)||[]).map(fromFS);
+    if("mapValue" in v){var o={},f=(v.mapValue&&v.mapValue.fields)||{};for(var k in f)o[k]=fromFS(f[k]);return o;}
+    return null;
+  }
+  // register(name, opts) — declare a field. Chainable.
+  //   encode(jsVal) → transformedJsVal   (applied before writing, e.g. strip file bytes)
+  //   decode(jsVal) → transformedJsVal   (applied after reading)
+  //   merger(cloud, local) → merged      (conflict resolution)
+  function register(name,opts){
+    _fields[name]={merger:opts.merger||null,encode:opts.encode||function(v){return v;},decode:opts.decode||function(v){return v;}};
+    return api;
+  }
+  // pull() — REST GET, bypasses SDK IndexedDB cache. Returns {field:value,...} or null on error.
+  function pull(){
+    if(!ready())return Promise.resolve(null);
+    var c=cred();if(!c.pid||!c.key)return Promise.resolve(null);
+    console.log("[sync] pulling from server (bypassing SDK cache)");
+    return fetch(baseUrl()+"?key="+c.key,{method:"GET",cache:"no-store"}).then(function(r){
+      if(r.status===404){console.log("[sync] pull: doc empty");return{};}
+      if(!r.ok)return r.text().then(function(t){console.warn("[sync] ❌ pull fail",r.status,t);return null;});
       return r.json().then(function(j){
-        var fields=j.fields||{};
-        var entries=fields.entries?firestoreValueToJS(fields.entries):[];
-        var payNotes=fields.payNotes?firestoreValueToJS(fields.payNotes):[];
-        console.log("[REST] ✅ pull ok — "+(entries?entries.length:0)+" entries from server");
-        return {entries:Array.isArray(entries)?entries:[],payNotes:Array.isArray(payNotes)?payNotes:[]};
+        var raw=(j&&j.fields)||{};
+        var out={};
+        Object.keys(_fields).forEach(function(k){
+          var decoded=raw[k]!==undefined?fromFS(raw[k]):[];
+          out[k]=_fields[k].decode(Array.isArray(decoded)?decoded:(decoded!==null?decoded:[]));
+        });
+        console.log("[sync] ✅ pull ok");
+        return out;
       });
-    }).catch(function(e){console.warn("[REST] pull network error:",e&&e.message||e);return null;});
-  }catch(e){console.warn("[REST] pull exception:",e&&e.message||e);return Promise.resolve(null);}
+    }).catch(function(e){console.warn("[sync] pull error:",e&&e.message);return null;});
+  }
+  // push(partial) — REST PATCH with keepalive. updateMask auto-built from keys.
+  // Pass any subset of registered fields: push({entries}) or push({payNotes}) or push({entries,payNotes}).
+  function push(partial){
+    if(!ready()){console.log("[sync] push skip — not ready");return Promise.resolve(false);}
+    var keys=Object.keys(partial);if(!keys.length)return Promise.resolve(true);
+    var c=cred();if(!c.pid||!c.key)return Promise.resolve(false);
+    var maskKeys=keys.concat(["updatedAtMs"]);
+    var mask=maskKeys.map(function(k){return"updateMask.fieldPaths="+encodeURIComponent(k);}).join("&");
+    var fields={};
+    keys.forEach(function(k){var fd=_fields[k];fields[k]=toFS(fd?fd.encode(partial[k]):partial[k]);});
+    fields.updatedAtMs=toFS(Date.now());
+    console.log("[sync] pushing fields:",keys.join(", "));
+    return fetch(baseUrl()+"?"+mask+"&key="+c.key,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({fields:fields}),keepalive:true}).then(function(r){
+      if(r.ok){console.log("[sync] ✅ push ok");return true;}
+      return r.text().then(function(t){console.warn("[sync] ❌ push fail",r.status,t);return false;});
+    }).catch(function(e){console.warn("[sync] push error:",e&&e.message);return false;});
+  }
+  // subscribe(cb) — SDK onSnapshot realtime listener. cb({field:value,...}). Returns unsubscribe fn.
+  // SDK fires immediately with cached data, then again with server data — both are fine.
+  function subscribe(cb){
+    if(!ready())return function(){};
+    try{
+      var fb=window.__fb;var parts=docPath.split("/");
+      var ref=fb.doc(fb.db,parts[0],parts[1]);
+      return fb.onSnapshot(ref,function(snap){
+        if(!snap.exists())return cb({});
+        var d=snap.data()||{};
+        var out={};
+        Object.keys(_fields).forEach(function(k){var v=d[k];out[k]=_fields[k].decode(Array.isArray(v)?v:(v!==undefined?v:[]));});
+        cb(out);
+      },function(err){console.warn("[sync] subscribe error:",err);});
+    }catch(e){console.warn("[sync] subscribe fail:",e);return function(){};}
+  }
+  // merge(cloud, localState) — apply each field's registered merger. Both args are {field:value,...}.
+  function merge(cloud,localState){
+    var merged={};
+    Object.keys(_fields).forEach(function(k){
+      var m=_fields[k].merger;
+      var c=(cloud&&cloud[k]!=null)?cloud[k]:[];
+      var l=(localState&&localState[k]!=null)?localState[k]:[];
+      merged[k]=m?m(c,l):(l!==undefined?l:c);
+    });
+    return merged;
+  }
+  var api={register:register,pull:pull,push:push,subscribe:subscribe,merge:merge};
+  return api;
 }
 
-// Fire-and-forget beacon push to Apps Script as a redundant fallback for
-// `pagehide` / tab-close on mobile. The problem: when Safari/Chrome on iOS
-// kills a tab, the Firestore SDK's pending IndexedDB→network sync can be
-// aborted mid-flight, so an edit "saved" on phone never reaches the cloud,
-// and the desktop never sees it. navigator.sendBeacon is the one network
-// primitive the OS *will* deliver after page unload. We send the same
-// snapshot to the existing Apps Script endpoint, which writes to the same
-// Sheets-backed store; the desktop then reads from Firestore as usual, but
-// at least our state isn't lost.
-// NOTE: this only helps if your Apps Script also writes back to Firestore
-// (or you have a separate reconciliation step). If it only writes to Sheets,
-// you'll get a Sheets backup but Firestore stays stale — still safer than
-// losing the edit entirely.
-// Push only payNotes field — called immediately on note add/delete so other
-// devices see the change without waiting for a full manual sync.
-function fbPushNotesREST(notes){
-  if(!fbReady())return Promise.resolve(false);
-  try{
-    var pid=window.__fb.projectId,key=window.__fb.apiKey;
-    if(!pid||!key)return Promise.resolve(false);
-    var url="https://firestore.googleapis.com/v1/projects/"+pid+"/databases/(default)/documents/"+FB_DOC_PATH[0]+"/"+FB_DOC_PATH[1]+"?updateMask.fieldPaths=payNotes&updateMask.fieldPaths=updatedAtMs&key="+key;
-    var body={fields:{payNotes:{arrayValue:dataToFirestoreFields(notes||[])},updatedAtMs:{integerValue:String(Date.now())}}};
-    return fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),keepalive:true}).then(function(r){
-      if(r.ok){console.log("[REST] ✅ notes push ok");return true;}
-      return r.text().then(function(t){console.warn("[REST] ❌ notes push fail",t);return false;});
-    }).catch(function(e){console.warn("[REST] notes push error:",e&&e.message||e);return false;});
-  }catch(e){console.warn("[REST] notes push exception:",e&&e.message||e);return Promise.resolve(false);}
+// mergePayNotes — global so it can be used as a registered merger.
+// Tombstone pattern: deletedAt always wins to ensure deletions propagate across devices.
+function mergePayNotes(a,b){
+  var byAt={};
+  (a||[]).concat(b||[]).forEach(function(n){
+    if(!n||!n.at)return;
+    var ex=byAt[n.at];
+    if(!ex){byAt[n.at]=n;return;}
+    if(n.deletedAt&&!ex.deletedAt){byAt[n.at]=n;return;}
+  });
+  return Object.keys(byAt).map(function(k){return byAt[k];}).sort(function(x,y){return y.at.localeCompare(x.at);});
 }
 
+// Singleton sync engine — all Firestore I/O goes through this one object.
+// Fields registered here are automatically handled by push / pull / subscribe.
+var sync=createSyncEngine("tracker/var");
+sync.register("entries",{
+  encode:function(arr){return(arr||[]).map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return{name:f.name,type:f.type,driveId:f.driveId||null};})});});},
+  merger:smartMerge
+});
+sync.register("payNotes",{merger:mergePayNotes});
+
+// beaconPush — last-resort backup to Apps Script via navigator.sendBeacon.
+// Delivered by the OS even after page unload; bypasses Firestore entirely.
 function beaconPush(data){
   if(!SYNC_URL||!navigator.sendBeacon)return false;
   try{
@@ -470,17 +467,6 @@ function beaconPush(data){
     var blob=new Blob([JSON.stringify(clean)],{type:"text/plain"});
     return navigator.sendBeacon(SYNC_URL+"?action=save",blob);
   }catch(e){console.warn("Beacon push fail:",e);return false;}
-}
-
-// Subscribe to Firestore changes; returns unsubscribe function.
-function fbSubscribe(cb){
-  if(!fbReady())return function(){};
-  try{
-    return window.__fb.onSnapshot(fbDocRef(),function(snap){
-      if(!snap.exists())return cb({entries:[],payNotes:[]});
-      var d=snap.data();cb({entries:Array.isArray(d.entries)?d.entries:[],payNotes:Array.isArray(d.payNotes)?d.payNotes:[]});
-    },function(err){console.warn("Firestore subscribe error:",err);});
-  }catch(e){console.warn("Firestore subscribe fail:",e);return function(){};}
 }
 
 function fmtTime(t){if(!t)return"";var d=new Date(t),now=new Date(),diff=(now-d)/1000;if(diff<60)return"vừa xong";if(diff<3600)return Math.floor(diff/60)+"p trước";if(diff<86400)return Math.floor(diff/3600)+"h trước";return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");}
@@ -691,10 +677,9 @@ function App(){
   React.useEffect(function(){
     window.__debug={
       fbInfo:function(){console.log("fbReady:",fbReady(),"window.__fb:",window.__fb);},
-      testREST:function(){return fbPushREST(dataRef.current).then(function(ok){console.log("testREST result:",ok);return ok;});},
-      testPull:function(){return fbPullREST().then(function(c){console.log("testPull result:",c?c.length+" entries":"null");return c;});},
-      testSDK:function(){return fbPush(dataRef.current).then(function(ok){console.log("testSDK result:",ok);return ok;});},
-      snapshot:function(){return dataRef.current;}
+      testPush:function(){return sync.push({entries:dataRef.current,payNotes:payNotesRef.current}).then(function(ok){console.log("testPush result:",ok);return ok;});},
+      testPull:function(){return sync.pull().then(function(c){console.log("testPull result:",c);return c;});},
+      snapshot:function(){return{entries:dataRef.current,payNotes:payNotesRef.current};}
     };
   },[]);
 
@@ -723,7 +708,7 @@ function App(){
     if(flushInProgressRef.current&&!opts.force)return Promise.resolve(false);
     flushInProgressRef.current=true;
     setSyncing(true);
-    return fbPush(snapshot,payNotesRef.current).then(function(ok){
+    return sync.push({entries:snapshot,payNotes:payNotesRef.current}).then(function(ok){
       setSyncing(false);
       flushInProgressRef.current=false;
       if(ok){pendingRef.current=false;setLastSync(Date.now());}
@@ -752,72 +737,65 @@ function App(){
   // Subscribe to Firestore + force-pull from server on mount.
   //
   // The order matters:
-  // 1. fbPullREST first — REST API hits the server directly, ignoring the
+  // 1. sync.pull() first — REST GET hits the server directly, ignoring the
   //    SDK's IndexedDB cache. If the desktop was closed while phone was
-  //    pushing updates, the SDK cache is stale; REST gives us truth.
+  //    pushing updates, the SDK cache is stale; REST gives us the truth.
   //    Merge result into local state immediately so user sees fresh data.
-  // 2. THEN fbSubscribe — sets up the realtime listener for ongoing changes.
-  //    Subsequent snapshots from onSnapshot handle live updates from other
-  //    devices.
+  // 2. THEN sync.subscribe() — sets up the realtime listener for ongoing changes.
+  //    Subsequent snapshots from onSnapshot handle live updates from other devices.
   React.useEffect(function(){
     if(!loaded||!fbIsReady)return;
     var unmounted=false;
-    // Step 1: REST pull from server, bypassing SDK cache
-    fbPullREST().then(function(cloud){
+    var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
+    // Step 1: REST pull from server, bypassing SDK IndexedDB cache
+    sync.pull().then(function(cloud){
       if(unmounted||cloud===null)return; // null = network error, keep local
       var local=loadLocal();
+      var localState={entries:local,payNotes:payNotesRef.current};
       if((cloud.entries||[]).length===0&&local.length>0){
-        // Cloud is empty but we have local → push our state up
-        fbPushREST(local,payNotesRef.current);
+        // Cloud is empty but we have local data → push our state up
+        sync.push({entries:local,payNotes:payNotesRef.current});
         return;
       }
-      var mergedNotes0=mergePayNotes(cloud.payNotes,payNotesRef.current);
-      if(JSON.stringify(mergedNotes0)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=mergedNotes0;setPayNotes(mergedNotes0);}
-      var merged=smartMerge(cloud.entries||[],local);
-      var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
-      if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged))){
+      var merged=sync.merge(cloud,localState);
+      if(JSON.stringify(merged.payNotes)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=merged.payNotes;setPayNotes(merged.payNotes);}
+      if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged.entries))){
         applyingRemoteRef.current=true;
-        setData(merged);
-        saveLocal(merged);
+        setData(merged.entries);
+        saveLocal(merged.entries);
         notify("🔄 Đã cập nhật");
       }
       setLastSync(Date.now());
     });
-    // Step 2: realtime listener for ongoing changes
-    var unsub=fbSubscribe(function(cloud){
+    // Step 2: realtime listener for ongoing changes from other devices
+    var unsub=sync.subscribe(function(cloud){
       var local=loadLocal();
       var cloudEntries=cloud.entries||[];
-      // First-ever subscribe: cloud may be empty → push our local up if we have any
-      if(cloudEntries.length===0&&local.length>0){fbPushREST(local,payNotesRef.current);return;}
-      var merged=smartMerge(cloudEntries,local);
-      // Avoid no-op rerenders + don't trigger our own push effect
-      var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
-      var hLocal=JSON.stringify(stripD(local));
-      var hMerged=JSON.stringify(stripD(merged));
-      if(hLocal!==hMerged){
+      // First-ever snapshot: cloud may be empty → push local up if we have any
+      if(cloudEntries.length===0&&local.length>0){sync.push({entries:local,payNotes:payNotesRef.current});return;}
+      var localState={entries:local,payNotes:payNotesRef.current};
+      var merged=sync.merge(cloud,localState);
+      if(JSON.stringify(merged.payNotes)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=merged.payNotes;setPayNotes(merged.payNotes);}
+      if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged.entries))){
         applyingRemoteRef.current=true;
-        setData(merged);
-        saveLocal(merged);
+        setData(merged.entries);
+        saveLocal(merged.entries);
         notify("🔄 Đã cập nhật");
       }
-      var mergedNotes=mergePayNotes(cloud.payNotes,payNotesRef.current);
-      if(JSON.stringify(mergedNotes)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=mergedNotes;setPayNotes(mergedNotes);}
       setLastSync(Date.now());
     });
     return function(){unmounted=true;unsub&&unsub();};
   },[loaded,fbIsReady]);
 
   // Save to localStorage on every data change. Push to cloud is handled at
-  // the action level (commitSave / tp / rm / mAll all call fbPushREST
-  // synchronously), so we DO NOT push from this effect anymore — doing so
-  // creates a race where a debounced SDK write fires AFTER the REST write
-  // and, if the SDK connection gets aborted (iOS freezing the tab), can
-  // overwrite the REST write with stale state.
+  // the action level (commitSave / tp / rm / mAll all call sync.push directly).
+  // We do NOT push from this effect to avoid races where a deferred write could
+  // overwrite a keepalive REST write with stale state when the tab is frozen.
   React.useEffect(function(){
     if(!loaded||!fbIsReady)return;
     saveLocal(data);
     if(applyingRemoteRef.current){applyingRemoteRef.current=false;return;}
-    // Don't schedule a push — actions push directly via fbPushREST.
+    // Don't schedule a push — actions push directly via sync.push.
   },[data,loaded,fbIsReady]);
 
   // Flush pending writes when user leaves the tab (mobile: switch app / close
@@ -830,31 +808,29 @@ function App(){
   //      the Apps Script fallback endpoint.
   // Belt-and-braces, because losing data on tab close is the bug we're fixing.
   // Flush pending writes when the page is about to be backgrounded/unloaded.
-  // Use ONLY fbPushREST (with keepalive) — it's the one the OS guarantees to
-  // deliver. SDK push here would race REST and potentially lose to it on iOS
-  // tab freeze. beaconPush is the last-resort backup to Apps Script.
+  // Use sync.push (REST + keepalive) on unload — OS-guaranteed delivery.
+  // beaconPush is the last-resort backup to Apps Script.
   React.useEffect(function(){
     if(!loaded||!fbIsReady)return;
     function flush(){
       var snap=dataRef.current;
-      fbPushREST(snap,payNotesRef.current);     // ⭐ keepalive — primary and only Firestore path on unload
-      beaconPush(snap);     // Apps Script backup (best-effort)
+      sync.push({entries:snap,payNotes:payNotesRef.current}); // ⭐ keepalive — OS-guaranteed delivery on unload
+      beaconPush(snap); // Apps Script backup (best-effort)
     }
     function onVisChange(){
       if(document.visibilityState==="hidden"){flush();return;}
-      // Visible again — force-pull fresh data from server (bypassing SDK
-      // cache) in case another device pushed while this tab was backgrounded.
-      // SDK's onSnapshot will also eventually re-sync but can be slow to
-      // notice changes when reconnecting from background.
-      fbPullREST().then(function(cloud){
+      // Visible again — REST pull bypasses SDK cache to catch changes from other devices
+      sync.pull().then(function(cloud){
         if(cloud===null)return;
         var local=loadLocal();
-        var merged=smartMerge(cloud,local);
+        var localState={entries:local,payNotes:payNotesRef.current};
+        var merged=sync.merge(cloud,localState);
         var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
-        if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged))){
+        if(JSON.stringify(merged.payNotes)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=merged.payNotes;setPayNotes(merged.payNotes);}
+        if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged.entries))){
           applyingRemoteRef.current=true;
-          setData(merged);
-          saveLocal(merged);
+          setData(merged.entries);
+          saveLocal(merged.entries);
           notify("🔄 Đã cập nhật");
         }
         setLastSync(Date.now());
@@ -915,35 +891,24 @@ function App(){
     return function(){clearTimeout(t);};
   },[lastSync]);
 
-  function mergePayNotes(a,b){
-  var byAt={};
-  (a||[]).concat(b||[]).forEach(function(n){
-    if(!n||!n.at)return;
-    var ex=byAt[n.at];
-    if(!ex){byAt[n.at]=n;return;}
-    // deletedAt tombstone always wins over live note
-    if(n.deletedAt&&!ex.deletedAt){byAt[n.at]=n;return;}
-  });
-  return Object.keys(byAt).map(function(k){return byAt[k];}).sort(function(x,y){return y.at.localeCompare(x.at);});
-}
   function doSync(){
     setSyncing(true);
-    // Step 1: pull fresh server state, merge with any unpushed local changes
-    fbPullREST().then(function(cloud){
+    // Step 1: pull fresh server state, merge with local
+    sync.pull().then(function(cloud){
       if(cloud===null){setSyncing(false);notify("⚠️ Lỗi đồng bộ");return null;}
       var local=loadLocal();
-      var merged=smartMerge(cloud.entries,local);
+      var localState={entries:local,payNotes:payNotesRef.current};
+      var merged=sync.merge(cloud,localState);
       var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
-      if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged))){
+      if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged.entries))){
         applyingRemoteRef.current=true;
-        setData(merged);
-        dataRef.current=merged;
-        saveLocal(merged);
+        setData(merged.entries);
+        dataRef.current=merged.entries;
+        saveLocal(merged.entries);
       }
-      var mergedNotes=mergePayNotes(cloud.payNotes,payNotesRef.current);
-      if(JSON.stringify(mergedNotes)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=mergedNotes;setPayNotes(mergedNotes);}
-      // Step 2: push merged result up so cloud and this device fully agree
-      return fbPushREST(merged,mergedNotes);
+      if(JSON.stringify(merged.payNotes)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=merged.payNotes;setPayNotes(merged.payNotes);}
+      // Step 2: push merged result up so cloud fully agrees with this device
+      return sync.push({entries:merged.entries,payNotes:merged.payNotes});
     }).then(function(ok){
       setSyncing(false);
       if(ok!==null){setLastSync(Date.now());notify("🔄 Đã đồng bộ");}
@@ -976,12 +941,8 @@ function App(){
     // the SDK push here: that would race the REST write (SDK connection can
     // get aborted by iOS freezing the tab, after which the SDK may overwrite
     // our REST write with stale state on its next reconnect).
-    fbPushREST(next,payNotesRef.current).then(function(ok){
-      if(!ok){
-        // Only fall back to SDK push if REST failed — last-resort save attempt
-        notify("⚠️ REST sync fail — retry via SDK");
-        pushNow({force:true,toastOnFail:true,data:next});
-      }
+    sync.push({entries:next,payNotes:payNotesRef.current}).then(function(ok){
+      if(!ok)pushNow({force:true,toastOnFail:true,data:next});
     });
   }
   function save(){if(!validateForm())return;if(saving||saved)return;setSaving(true);setTimeout(function(){setSaving(false);setSaved(true);setTimeout(function(){setSaved(false);commitSave();},420);},820);}
@@ -1015,7 +976,7 @@ function App(){
     setData(next);
     setDelId(null);
     notify("🗑️ Xoá");
-    fbPushREST(next,payNotesRef.current).then(function(ok){if(!ok)pushNow({force:true,data:next});});
+    sync.push({entries:next,payNotes:payNotesRef.current}).then(function(ok){if(!ok)pushNow({force:true,data:next});});
   }
   function ed(e){setForm(Object.assign({},e,{files:e.files||[]}));setEid(e.id);setTab("add");}
   function tp(id,f){
@@ -1024,7 +985,7 @@ function App(){
     dataRef.current=next;
     saveLocal(next);
     setData(next);
-    fbPushREST(next,payNotesRef.current).then(function(ok){if(!ok)pushNow({force:true,data:next});});
+    sync.push({entries:next,payNotes:payNotesRef.current}).then(function(ok){if(!ok)pushNow({force:true,data:next});});
   }
   function mAll(f){
     var ids={};fl().forEach(function(e){ids[e.id]=1;});
@@ -1034,7 +995,7 @@ function App(){
     saveLocal(next);
     setData(next);
     notify("✅ Xong");
-    fbPushREST(next,payNotesRef.current).then(function(ok){if(!ok)pushNow({force:true,data:next});});
+    sync.push({entries:next,payNotes:payNotesRef.current}).then(function(ok){if(!ok)pushNow({force:true,data:next});});
   }
 
   var fl=React.useCallback(function(){
@@ -1439,12 +1400,12 @@ function App(){
               return <div key={n.at} style={{background:i===0?"rgba(249,168,37,.22)":"rgba(249,168,37,.08)",borderLeft:"3px solid "+(i===0?"#F9A825":"rgba(249,168,37,.35)"),borderRadius:"0 8px 8px 0",padding:"8px 10px",marginBottom:6}}>
                 <div style={{fontSize:10,color:"#A1887F",fontWeight:700,marginBottom:3}}>{dt}</div>
                 <div style={{fontSize:12,color:"#3E2723",lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{n.text}</div>
-                <button onClick={(function(at){return function(){var nn=payNotesRef.current.map(function(note){return note.at===at?Object.assign({},note,{deletedAt:Date.now()}):note;});payNotesRef.current=nn;setPayNotes(nn);fbPushNotesREST(nn);};})(n.at)} style={{marginTop:5,background:"none",border:"none",color:"rgba(198,40,40,.55)",fontSize:10,cursor:"pointer",padding:0,fontFamily:"inherit",display:"block"}}>✕ Xóa</button>
+                <button onClick={(function(at){return function(){var nn=payNotesRef.current.map(function(note){return note.at===at?Object.assign({},note,{deletedAt:Date.now()}):note;});payNotesRef.current=nn;setPayNotes(nn);sync.push({payNotes:nn});};})(n.at)} style={{marginTop:5,background:"none",border:"none",color:"rgba(198,40,40,.55)",fontSize:10,cursor:"pointer",padding:0,fontFamily:"inherit",display:"block"}}>✕ Xóa</button>
               </div>;
             })}
           </div>
           <textarea value={payNoteText} onChange={function(e){setPayNoteText(e.target.value);}} placeholder={"VD: Nhận lương V.League vòng 17–20\ntừ a Cường hôm nay"} style={{width:"100%",minHeight:76,background:"rgba(255,255,255,.8)",border:"1px solid rgba(249,168,37,.55)",borderRadius:10,padding:"8px 10px",fontSize:12,color:"#3E2723",fontFamily:"inherit",resize:"vertical",boxSizing:"border-box",outline:"none",lineHeight:1.5}}/>
-          <button onClick={function(){if(!payNoteText.trim())return;var nn=[{text:payNoteText.trim(),at:new Date().toISOString()}].concat(payNotesRef.current);payNotesRef.current=nn;setPayNotes(nn);setPayNoteText("");fbPushNotesREST(nn);}} style={{width:"100%",marginTop:8,background:"#F9A825",border:"none",borderRadius:10,padding:"10px",fontSize:13,fontWeight:800,color:"#fff",cursor:"pointer",fontFamily:"inherit",letterSpacing:.2}}>💾 Lưu ghi chú</button>
+          <button onClick={function(){if(!payNoteText.trim())return;var nn=[{text:payNoteText.trim(),at:new Date().toISOString()}].concat(payNotesRef.current);payNotesRef.current=nn;setPayNotes(nn);setPayNoteText("");sync.push({payNotes:nn});}} style={{width:"100%",marginTop:8,background:"#F9A825",border:"none",borderRadius:10,padding:"10px",fontSize:13,fontWeight:800,color:"#fff",cursor:"pointer",fontFamily:"inherit",letterSpacing:.2}}>💾 Lưu ghi chú</button>
         </div>}
         <button onClick={function(){setShowPayNote(!showPayNote);}} style={{background:showPayNote?"#F9A825":"#FFF9C4",border:"1px solid #F9A825",borderRight:"none",borderRadius:"10px 0 0 10px",padding:"18px 8px",cursor:"pointer",boxShadow:"-3px 0 12px rgba(0,0,0,.13)",display:"flex",flexDirection:"column",alignItems:"center",gap:5,fontFamily:"inherit",transition:"background .2s"}}>
           <span style={{fontSize:20}}>📝</span>
