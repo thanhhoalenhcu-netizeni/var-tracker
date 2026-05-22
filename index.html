@@ -311,6 +311,10 @@ function loadRoster(){
 }
 function saveRoster(r){try{localStorage.setItem(ROSTER_STORE,JSON.stringify(r));}catch(e){}}
 
+var PAY_NOTES_KEY="payNotes_v1";
+function loadPayNotes(){try{var d=localStorage.getItem(PAY_NOTES_KEY);return d?JSON.parse(d):[];}catch(e){return[];}}
+function savePayNotes(n){try{localStorage.setItem(PAY_NOTES_KEY,JSON.stringify(n));}catch(e){}}
+
 // === Firestore realtime sync ===
 // Document path: /tracker/var (single doc, contains entire data array). Small
 // dataset (~hundreds of matches × ~1KB metadata each) so monolithic doc is
@@ -646,6 +650,10 @@ function App(){
   var[roster,setRoster]=React.useState(loadRoster);
   var[rosterModal,setRosterModal]=React.useState(false);
   React.useEffect(function(){saveRoster(roster);},[roster]);
+  var[showPayNote,setShowPayNote]=React.useState(false);
+  var[payNotes,setPayNotes]=React.useState(loadPayNotes);
+  var[payNoteText,setPayNoteText]=React.useState("");
+  React.useEffect(function(){savePayNotes(payNotes);},[payNotes]);
   var[undoData,setUndoData]=React.useState(null); // {id, field, wasPaid} for undo snackbar
   var undoTimerRef=React.useRef(null);
   var[preview,setPreview]=React.useState(null);
@@ -1379,6 +1387,30 @@ function App(){
             {unpaidL.length===0&&paidL.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"var(--t3)"}}>Không có trận nào</div>}
           </div>;
         })()}
+      {/* Floating sticky note */}
+      <div style={{position:"fixed",right:0,top:"50%",transform:"translateY(-50%)",zIndex:500,display:"flex",alignItems:"center"}}>
+        {showPayNote&&<div style={{width:272,maxWidth:"calc(100vw - 48px)",maxHeight:"72vh",overflowY:"auto",background:"#FFFDE7",border:"1px solid #F9A825",borderRight:"none",borderRadius:"16px 0 0 16px",padding:16,boxShadow:"-6px 0 28px rgba(0,0,0,.22)",boxSizing:"border-box"}}>
+          <div style={{fontSize:14,fontWeight:800,color:"#5D4037",marginBottom:12,letterSpacing:.2}}>📝 Ghi chú thanh toán</div>
+          {payNotes.length===0&&<div style={{fontSize:12,color:"#A1887F",textAlign:"center",padding:"6px 0 14px",fontStyle:"italic"}}>Chưa có ghi chú nào</div>}
+          <div style={{marginBottom:10}}>
+            {payNotes.slice(0,5).map(function(n,i){
+              var d=new Date(n.at);
+              var dt=String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+              return <div key={i} style={{background:i===0?"rgba(249,168,37,.22)":"rgba(249,168,37,.08)",borderLeft:"3px solid "+(i===0?"#F9A825":"rgba(249,168,37,.35)"),borderRadius:"0 8px 8px 0",padding:"8px 10px",marginBottom:6}}>
+                <div style={{fontSize:10,color:"#A1887F",fontWeight:700,marginBottom:3}}>{dt}</div>
+                <div style={{fontSize:12,color:"#3E2723",lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{n.text}</div>
+                <button onClick={function(){setPayNotes(function(p){return p.filter(function(_,j){return j!==i;});});}} style={{marginTop:5,background:"none",border:"none",color:"rgba(198,40,40,.55)",fontSize:10,cursor:"pointer",padding:0,fontFamily:"inherit",display:"block"}}>✕ Xóa</button>
+              </div>;
+            })}
+          </div>
+          <textarea value={payNoteText} onChange={function(e){setPayNoteText(e.target.value);}} placeholder={"VD: Nhận lương V.League vòng 17–20\ntừ a Cường hôm nay"} style={{width:"100%",minHeight:76,background:"rgba(255,255,255,.8)",border:"1px solid rgba(249,168,37,.55)",borderRadius:10,padding:"8px 10px",fontSize:12,color:"#3E2723",fontFamily:"inherit",resize:"vertical",boxSizing:"border-box",outline:"none",lineHeight:1.5}}/>
+          <button onClick={function(){if(!payNoteText.trim())return;setPayNotes(function(p){return [{text:payNoteText.trim(),at:new Date().toISOString()}].concat(p);});setPayNoteText("");}} style={{width:"100%",marginTop:8,background:"#F9A825",border:"none",borderRadius:10,padding:"10px",fontSize:13,fontWeight:800,color:"#fff",cursor:"pointer",fontFamily:"inherit",letterSpacing:.2}}>💾 Lưu ghi chú</button>
+        </div>}
+        <button onClick={function(){setShowPayNote(!showPayNote);}} style={{background:showPayNote?"#F9A825":"#FFF9C4",border:"1px solid #F9A825",borderRight:"none",borderRadius:"10px 0 0 10px",padding:"18px 8px",cursor:"pointer",boxShadow:"-3px 0 12px rgba(0,0,0,.13)",display:"flex",flexDirection:"column",alignItems:"center",gap:5,fontFamily:"inherit",transition:"background .2s"}}>
+          <span style={{fontSize:20}}>📝</span>
+          <span style={{fontSize:9,fontWeight:800,color:showPayNote?"#fff":"#5D4037",writingMode:"vertical-lr",transform:"rotate(180deg)",letterSpacing:1.5,transition:"color .2s"}}>{payNotes.length>0?"("+payNotes.length+")":"GHI CHÚ"}</span>
+        </button>
+      </div>
       </div>}
 
       {/* TIMELINE - chỉ hiện trận chưa thu đủ */}
