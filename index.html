@@ -915,7 +915,17 @@ function App(){
     return function(){clearTimeout(t);};
   },[lastSync]);
 
-  function mergePayNotes(a,b){var seen={};return(a||[]).concat(b||[]).filter(function(n){if(!n||!n.at||seen[n.at])return false;seen[n.at]=true;return true;}).sort(function(x,y){return y.at.localeCompare(x.at);});}
+  function mergePayNotes(a,b){
+  var byAt={};
+  (a||[]).concat(b||[]).forEach(function(n){
+    if(!n||!n.at)return;
+    var ex=byAt[n.at];
+    if(!ex){byAt[n.at]=n;return;}
+    // deletedAt tombstone always wins over live note
+    if(n.deletedAt&&!ex.deletedAt){byAt[n.at]=n;return;}
+  });
+  return Object.keys(byAt).map(function(k){return byAt[k];}).sort(function(x,y){return y.at.localeCompare(x.at);});
+}
   function doSync(){
     setSyncing(true);
     // Step 1: pull fresh server state, merge with any unpushed local changes
@@ -1421,15 +1431,15 @@ function App(){
       <div style={{position:"fixed",right:0,top:"50%",transform:"translateY(-50%)",zIndex:500,display:"flex",alignItems:"center"}}>
         {showPayNote&&<div style={{width:272,maxWidth:"calc(100vw - 48px)",maxHeight:"72vh",overflowY:"auto",background:"#FFFDE7",border:"1px solid #F9A825",borderRight:"none",borderRadius:"16px 0 0 16px",padding:16,boxShadow:"-6px 0 28px rgba(0,0,0,.22)",boxSizing:"border-box"}}>
           <div style={{fontSize:14,fontWeight:800,color:"#5D4037",marginBottom:12,letterSpacing:.2}}>📝 Ghi chú thanh toán</div>
-          {payNotes.length===0&&<div style={{fontSize:12,color:"#A1887F",textAlign:"center",padding:"6px 0 14px",fontStyle:"italic"}}>Chưa có ghi chú nào</div>}
+          {(function(){var liveNotes=payNotes.filter(function(n){return !n.deletedAt;});return liveNotes.length===0?<div style={{fontSize:12,color:"#A1887F",textAlign:"center",padding:"6px 0 14px",fontStyle:"italic"}}>Chưa có ghi chú nào</div>:null;})()}
           <div style={{marginBottom:10}}>
-            {payNotes.slice(0,5).map(function(n,i){
+            {payNotes.filter(function(n){return !n.deletedAt;}).slice(0,5).map(function(n,i){
               var d=new Date(n.at);
               var dt=String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
-              return <div key={i} style={{background:i===0?"rgba(249,168,37,.22)":"rgba(249,168,37,.08)",borderLeft:"3px solid "+(i===0?"#F9A825":"rgba(249,168,37,.35)"),borderRadius:"0 8px 8px 0",padding:"8px 10px",marginBottom:6}}>
+              return <div key={n.at} style={{background:i===0?"rgba(249,168,37,.22)":"rgba(249,168,37,.08)",borderLeft:"3px solid "+(i===0?"#F9A825":"rgba(249,168,37,.35)"),borderRadius:"0 8px 8px 0",padding:"8px 10px",marginBottom:6}}>
                 <div style={{fontSize:10,color:"#A1887F",fontWeight:700,marginBottom:3}}>{dt}</div>
                 <div style={{fontSize:12,color:"#3E2723",lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{n.text}</div>
-                <button onClick={function(){var nn=payNotesRef.current.filter(function(_,j){return j!==i;});payNotesRef.current=nn;setPayNotes(nn);fbPushNotesREST(nn);}} style={{marginTop:5,background:"none",border:"none",color:"rgba(198,40,40,.55)",fontSize:10,cursor:"pointer",padding:0,fontFamily:"inherit",display:"block"}}>✕ Xóa</button>
+                <button onClick={(function(at){return function(){var nn=payNotesRef.current.map(function(note){return note.at===at?Object.assign({},note,{deletedAt:Date.now()}):note;});payNotesRef.current=nn;setPayNotes(nn);fbPushNotesREST(nn);};})(n.at)} style={{marginTop:5,background:"none",border:"none",color:"rgba(198,40,40,.55)",fontSize:10,cursor:"pointer",padding:0,fontFamily:"inherit",display:"block"}}>✕ Xóa</button>
               </div>;
             })}
           </div>
@@ -1438,7 +1448,7 @@ function App(){
         </div>}
         <button onClick={function(){setShowPayNote(!showPayNote);}} style={{background:showPayNote?"#F9A825":"#FFF9C4",border:"1px solid #F9A825",borderRight:"none",borderRadius:"10px 0 0 10px",padding:"18px 8px",cursor:"pointer",boxShadow:"-3px 0 12px rgba(0,0,0,.13)",display:"flex",flexDirection:"column",alignItems:"center",gap:5,fontFamily:"inherit",transition:"background .2s"}}>
           <span style={{fontSize:20}}>📝</span>
-          <span style={{fontSize:9,fontWeight:800,color:showPayNote?"#fff":"#5D4037",writingMode:"vertical-lr",transform:"rotate(180deg)",letterSpacing:1.5,transition:"color .2s"}}>{payNotes.length>0?"("+payNotes.length+")":"GHI CHÚ"}</span>
+          <span style={{fontSize:9,fontWeight:800,color:showPayNote?"#fff":"#5D4037",writingMode:"vertical-lr",transform:"rotate(180deg)",letterSpacing:1.5,transition:"color .2s"}}>{(function(){var c=payNotes.filter(function(n){return !n.deletedAt;}).length;return c>0?"("+c+")":"GHI CHÚ";})()</span>
         </button>
       </div>
       </div>}
