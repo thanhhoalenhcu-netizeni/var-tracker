@@ -231,7 +231,7 @@ function getRounds(comp){
   if(comp==="Cúp Quốc Gia")return [""].concat(CUP_ROUNDS);
   if(comp==="Siêu Cúp")return ["","Trận Siêu Cúp"];
   if(comp==="Khác")return null; // free text
-  var r=[""];for(var i=1;i<=25;i++)r.push("Vòng "+i);return r;
+  var r=[""];for(var i=1;i<=26;i++)r.push("Vòng "+i);return r;
 }
 var MN=["Tháng 1","Tháng 2","Tháng 3","Tháng 4","Tháng 5","Tháng 6","Tháng 7","Tháng 8","Tháng 9","Tháng 10","Tháng 11","Tháng 12"];
 var DW=["T2","T3","T4","T5","T6","T7","CN"];
@@ -1070,7 +1070,11 @@ function App(){
   var presetBtns=[{id:"thismonth",lb:"Tháng này"},{id:"lastmonth",lb:"Tháng trước"},{id:"next7",lb:"7 ngày tới"},{id:"unpaid",lb:"Chưa thu"},{id:"all",lb:"Tất cả"}];
 
   var comps=(function(){var cs={};data.filter(function(e){return e&&!e.deletedAt&&e.competition;}).forEach(function(e){cs[e.competition]=true;});return Object.keys(cs).sort();})();
-  var rounds=(function(){var rs={};data.filter(function(e){return e&&!e.deletedAt&&e.round&&(!fComp||e.competition===fComp);}).forEach(function(e){rs[e.round]=true;});return Object.keys(rs).sort(function(a,b){var na=parseInt((a.match(/\d+/)||[0])[0]),nb=parseInt((b.match(/\d+/)||[0])[0]);return na-nb;});})();
+  var rounds=(function(){
+    if(fComp){var pr=getRounds(fComp);if(pr!==null)return pr.filter(function(r){return r;});}
+    var rs={};data.filter(function(e){return e&&!e.deletedAt&&e.round&&(!fComp||e.competition===fComp);}).forEach(function(e){rs[e.round]=true;});
+    return Object.keys(rs).sort(function(a,b){var na=parseInt((a.match(/\d+/)||[0])[0]),nb=parseInt((b.match(/\d+/)||[0])[0]);return na-nb;});
+  })();
   var hasFilter=!!(dFrom||dTo||preset||fComp||fRoundFrom||fRoundTo);
   var Filter=<div style={{marginBottom:14}}>
     <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:8,WebkitOverflowScrolling:"touch"}}>
