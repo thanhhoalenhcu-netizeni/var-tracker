@@ -723,7 +723,7 @@ function App(){
     if(flushInProgressRef.current&&!opts.force)return Promise.resolve(false);
     flushInProgressRef.current=true;
     setSyncing(true);
-    return fbPush(snapshot).then(function(ok){
+    return fbPush(snapshot,payNotesRef.current).then(function(ok){
       setSyncing(false);
       flushInProgressRef.current=false;
       if(ok){pendingRef.current=false;setLastSync(Date.now());}
@@ -766,12 +766,14 @@ function App(){
     fbPullREST().then(function(cloud){
       if(unmounted||cloud===null)return; // null = network error, keep local
       var local=loadLocal();
-      if(cloud.length===0&&local.length>0){
+      if((cloud.entries||[]).length===0&&local.length>0){
         // Cloud is empty but we have local → push our state up
-        fbPushREST(local);
+        fbPushREST(local,payNotesRef.current);
         return;
       }
-      var merged=smartMerge(cloud,local);
+      var mergedNotes0=mergePayNotes(cloud.payNotes,payNotesRef.current);
+      if(JSON.stringify(mergedNotes0)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=mergedNotes0;setPayNotes(mergedNotes0);}
+      var merged=smartMerge(cloud.entries||[],local);
       var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
       if(JSON.stringify(stripD(local))!==JSON.stringify(stripD(merged))){
         applyingRemoteRef.current=true;
@@ -835,7 +837,7 @@ function App(){
     if(!loaded||!fbIsReady)return;
     function flush(){
       var snap=dataRef.current;
-      fbPushREST(snap);     // ⭐ keepalive — primary and only Firestore path on unload
+      fbPushREST(snap,payNotesRef.current);     // ⭐ keepalive — primary and only Firestore path on unload
       beaconPush(snap);     // Apps Script backup (best-effort)
     }
     function onVisChange(){
@@ -964,7 +966,7 @@ function App(){
     // the SDK push here: that would race the REST write (SDK connection can
     // get aborted by iOS freezing the tab, after which the SDK may overwrite
     // our REST write with stale state on its next reconnect).
-    fbPushREST(next).then(function(ok){
+    fbPushREST(next,payNotesRef.current).then(function(ok){
       if(!ok){
         // Only fall back to SDK push if REST failed — last-resort save attempt
         notify("⚠️ REST sync fail — retry via SDK");
@@ -1003,7 +1005,7 @@ function App(){
     setData(next);
     setDelId(null);
     notify("🗑️ Xoá");
-    fbPushREST(next).then(function(ok){if(!ok)pushNow({force:true,data:next});});
+    fbPushREST(next,payNotesRef.current).then(function(ok){if(!ok)pushNow({force:true,data:next});});
   }
   function ed(e){setForm(Object.assign({},e,{files:e.files||[]}));setEid(e.id);setTab("add");}
   function tp(id,f){
@@ -1012,7 +1014,7 @@ function App(){
     dataRef.current=next;
     saveLocal(next);
     setData(next);
-    fbPushREST(next).then(function(ok){if(!ok)pushNow({force:true,data:next});});
+    fbPushREST(next,payNotesRef.current).then(function(ok){if(!ok)pushNow({force:true,data:next});});
   }
   function mAll(f){
     var ids={};fl().forEach(function(e){ids[e.id]=1;});
@@ -1022,7 +1024,7 @@ function App(){
     saveLocal(next);
     setData(next);
     notify("✅ Xong");
-    fbPushREST(next).then(function(ok){if(!ok)pushNow({force:true,data:next});});
+    fbPushREST(next,payNotesRef.current).then(function(ok){if(!ok)pushNow({force:true,data:next});});
   }
 
   var fl=React.useCallback(function(){
