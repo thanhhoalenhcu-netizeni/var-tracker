@@ -447,6 +447,22 @@ function fbPullREST(){
 // (or you have a separate reconciliation step). If it only writes to Sheets,
 // you'll get a Sheets backup but Firestore stays stale — still safer than
 // losing the edit entirely.
+// Push only payNotes field — called immediately on note add/delete so other
+// devices see the change without waiting for a full manual sync.
+function fbPushNotesREST(notes){
+  if(!fbReady())return Promise.resolve(false);
+  try{
+    var pid=window.__fb.projectId,key=window.__fb.apiKey;
+    if(!pid||!key)return Promise.resolve(false);
+    var url="https://firestore.googleapis.com/v1/projects/"+pid+"/databases/(default)/documents/"+FB_DOC_PATH[0]+"/"+FB_DOC_PATH[1]+"?updateMask.fieldPaths=payNotes&updateMask.fieldPaths=updatedAtMs&key="+key;
+    var body={fields:{payNotes:{arrayValue:dataToFirestoreFields(notes||[])},updatedAtMs:{integerValue:String(Date.now())}}};
+    return fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),keepalive:true}).then(function(r){
+      if(r.ok){console.log("[REST] ✅ notes push ok");return true;}
+      return r.text().then(function(t){console.warn("[REST] ❌ notes push fail",t);return false;});
+    }).catch(function(e){console.warn("[REST] notes push error:",e&&e.message||e);return false;});
+  }catch(e){console.warn("[REST] notes push exception:",e&&e.message||e);return Promise.resolve(false);}
+}
+
 function beaconPush(data){
   if(!SYNC_URL||!navigator.sendBeacon)return false;
   try{
@@ -1411,12 +1427,12 @@ function App(){
               return <div key={i} style={{background:i===0?"rgba(249,168,37,.22)":"rgba(249,168,37,.08)",borderLeft:"3px solid "+(i===0?"#F9A825":"rgba(249,168,37,.35)"),borderRadius:"0 8px 8px 0",padding:"8px 10px",marginBottom:6}}>
                 <div style={{fontSize:10,color:"#A1887F",fontWeight:700,marginBottom:3}}>{dt}</div>
                 <div style={{fontSize:12,color:"#3E2723",lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{n.text}</div>
-                <button onClick={function(){setPayNotes(function(p){return p.filter(function(_,j){return j!==i;});});}} style={{marginTop:5,background:"none",border:"none",color:"rgba(198,40,40,.55)",fontSize:10,cursor:"pointer",padding:0,fontFamily:"inherit",display:"block"}}>✕ Xóa</button>
+                <button onClick={function(){var nn=payNotesRef.current.filter(function(_,j){return j!==i;});payNotesRef.current=nn;setPayNotes(nn);fbPushNotesREST(nn);}} style={{marginTop:5,background:"none",border:"none",color:"rgba(198,40,40,.55)",fontSize:10,cursor:"pointer",padding:0,fontFamily:"inherit",display:"block"}}>✕ Xóa</button>
               </div>;
             })}
           </div>
           <textarea value={payNoteText} onChange={function(e){setPayNoteText(e.target.value);}} placeholder={"VD: Nhận lương V.League vòng 17–20\ntừ a Cường hôm nay"} style={{width:"100%",minHeight:76,background:"rgba(255,255,255,.8)",border:"1px solid rgba(249,168,37,.55)",borderRadius:10,padding:"8px 10px",fontSize:12,color:"#3E2723",fontFamily:"inherit",resize:"vertical",boxSizing:"border-box",outline:"none",lineHeight:1.5}}/>
-          <button onClick={function(){if(!payNoteText.trim())return;setPayNotes(function(p){return [{text:payNoteText.trim(),at:new Date().toISOString()}].concat(p);});setPayNoteText("");}} style={{width:"100%",marginTop:8,background:"#F9A825",border:"none",borderRadius:10,padding:"10px",fontSize:13,fontWeight:800,color:"#fff",cursor:"pointer",fontFamily:"inherit",letterSpacing:.2}}>💾 Lưu ghi chú</button>
+          <button onClick={function(){if(!payNoteText.trim())return;var nn=[{text:payNoteText.trim(),at:new Date().toISOString()}].concat(payNotesRef.current);payNotesRef.current=nn;setPayNotes(nn);setPayNoteText("");fbPushNotesREST(nn);}} style={{width:"100%",marginTop:8,background:"#F9A825",border:"none",borderRadius:10,padding:"10px",fontSize:13,fontWeight:800,color:"#fff",cursor:"pointer",fontFamily:"inherit",letterSpacing:.2}}>💾 Lưu ghi chú</button>
         </div>}
         <button onClick={function(){setShowPayNote(!showPayNote);}} style={{background:showPayNote?"#F9A825":"#FFF9C4",border:"1px solid #F9A825",borderRight:"none",borderRadius:"10px 0 0 10px",padding:"18px 8px",cursor:"pointer",boxShadow:"-3px 0 12px rgba(0,0,0,.13)",display:"flex",flexDirection:"column",alignItems:"center",gap:5,fontFamily:"inherit",transition:"background .2s"}}>
           <span style={{fontSize:20}}>📝</span>
