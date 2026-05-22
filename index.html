@@ -1448,7 +1448,7 @@ function App(){
         </div>}
         <button onClick={function(){setShowPayNote(!showPayNote);}} style={{background:showPayNote?"#F9A825":"#FFF9C4",border:"1px solid #F9A825",borderRight:"none",borderRadius:"10px 0 0 10px",padding:"18px 8px",cursor:"pointer",boxShadow:"-3px 0 12px rgba(0,0,0,.13)",display:"flex",flexDirection:"column",alignItems:"center",gap:5,fontFamily:"inherit",transition:"background .2s"}}>
           <span style={{fontSize:20}}>📝</span>
-          <span style={{fontSize:9,fontWeight:800,color:showPayNote?"#fff":"#5D4037",writingMode:"vertical-lr",transform:"rotate(180deg)",letterSpacing:1.5,transition:"color .2s"}}>{(function(){var c=payNotes.filter(function(n){return !n.deletedAt;}).length;return c>0?"("+c+")":"GHI CHÚ";})()</span>
+          <span style={{fontSize:9,fontWeight:800,color:showPayNote?"#fff":"#5D4037",writingMode:"vertical-lr",transform:"rotate(180deg)",letterSpacing:1.5,transition:"color .2s"}}>{(function(){var c=payNotes.filter(function(n){return !n.deletedAt;}).length;return c>0?"("+c+")":"GHI CHÚ";})()}</span>
         </button>
       </div>
       </div>}
