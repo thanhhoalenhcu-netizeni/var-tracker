@@ -654,7 +654,7 @@ function App(){
   var[showPayNote,setShowPayNote]=React.useState(false);
   var[payNotes,setPayNotes]=React.useState(loadPayNotes);
   var[payNoteText,setPayNoteText]=React.useState("");
-  React.useEffect(function(){savePayNotes(payNotes);},[payNotes]);
+  React.useEffect(function(){payNotesRef.current=payNotes;savePayNotes(payNotes);},[payNotes]);
   var[undoData,setUndoData]=React.useState(null); // {id, field, wasPaid} for undo snackbar
   var undoTimerRef=React.useRef(null);
   var[preview,setPreview]=React.useState(null);
@@ -690,6 +690,7 @@ function App(){
   // received from the listener (would create an infinite write loop).
   var applyingRemoteRef=React.useRef(false);
   var dataRef=React.useRef([]);
+  var payNotesRef=React.useRef(loadPayNotes());
   var flushInProgressRef=React.useRef(false);
   var fbReadyState=React.useState(fbReady());
   var fbIsReady=fbReadyState[0],setFbIsReady=fbReadyState[1];
@@ -769,7 +770,7 @@ function App(){
       var local=loadLocal();
       var cloudEntries=cloud.entries||[];
       // First-ever subscribe: cloud may be empty → push our local up if we have any
-      if(cloudEntries.length===0&&local.length>0){fbPushREST(local,payNotes);return;}
+      if(cloudEntries.length===0&&local.length>0){fbPushREST(local,payNotesRef.current);return;}
       var merged=smartMerge(cloudEntries,local);
       // Avoid no-op rerenders + don't trigger our own push effect
       var stripD=function(arr){return arr.map(function(e){return Object.assign({},e,{files:(e.files||[]).map(function(f){return f?{name:f.name,type:f.type,driveId:f.driveId||null}:f;})});});};
@@ -781,8 +782,8 @@ function App(){
         saveLocal(merged);
         notify("🔄 Đã cập nhật");
       }
-      var mergedNotes=mergePayNotes(cloud.payNotes,payNotes);
-      if(JSON.stringify(mergedNotes)!==JSON.stringify(payNotes)){setPayNotes(mergedNotes);}
+      var mergedNotes=mergePayNotes(cloud.payNotes,payNotesRef.current);
+      if(JSON.stringify(mergedNotes)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=mergedNotes;setPayNotes(mergedNotes);}
       setLastSync(Date.now());
     });
     return function(){unmounted=true;unsub&&unsub();};
@@ -911,8 +912,8 @@ function App(){
         dataRef.current=merged;
         saveLocal(merged);
       }
-      var mergedNotes=mergePayNotes(cloud.payNotes,payNotes);
-      if(JSON.stringify(mergedNotes)!==JSON.stringify(payNotes)){setPayNotes(mergedNotes);}
+      var mergedNotes=mergePayNotes(cloud.payNotes,payNotesRef.current);
+      if(JSON.stringify(mergedNotes)!==JSON.stringify(payNotesRef.current)){payNotesRef.current=mergedNotes;setPayNotes(mergedNotes);}
       // Step 2: push merged result up so cloud and this device fully agree
       return fbPushREST(merged,mergedNotes);
     }).then(function(ok){
